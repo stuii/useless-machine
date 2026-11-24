@@ -7,16 +7,17 @@ constexpr bool progression() {
   Model m;
   if (m.mood() != Mood::Happy) return false;
   m.activate(); if (m.mood() != Mood::Curious) return false;
+  m.activate(); if (m.mood() == Mood::Playful) return false;
   m.activate(); if (m.mood() != Mood::Playful) return false;
-  for (int i=2; i<7; ++i) m.activate();
-  if (m.mood()==Mood::Annoyed || m.mood()==Mood::Furious) return false;
-  m.activate(); if (m.mood()!=Mood::Annoyed) return false;
-  for (int i=8; i<10; ++i) m.activate();
-  if (m.mood()!=Mood::Furious) return false;
-  for (int i=10; i<17; ++i) m.activate();
+  m.activate(); m.activate(); // Fourth/fifth pokes are still below anger threshold.
+  if (m.mood()==Mood::Annoyed || m.mood()==Mood::Furious || m.mood()==Mood::Tired) return false;
+  m.activate(); if (m.mood()!=Mood::Annoyed) return false; // Sixth.
+  m.activate(); if (m.mood()!=Mood::Furious) return false; // Seventh.
+  m.activate(); if (m.mood()!=Mood::Furious) return false; // Eighth.
+  m.activate();
   return m.mood() == Mood::Tired;
 }
-static_assert(progression(), "Rapid pokes should excite, annoy, anger, then exhaust");
+static_assert(progression(), "Playful needs three pokes; sustained poking tires the machine by nine");
 constexpr bool recovery() {
   Model m;
   for (int i = 0; i < 20; ++i) m.activate();
@@ -128,7 +129,7 @@ constexpr bool newTraitsMatter() {
   Model curious; curious.values.excitement = 20; curious.values.curiosity = 80;
   Model bored = curious; bored.values.curiosity = 10;
   if (curious.mood() != Mood::Curious || bored.mood() == Mood::Curious) return false;
-  Model imp; imp.values.excitement = 50; imp.values.mischief = 80; imp.activations = 2;
+  Model imp; imp.playStreak = 3; imp.values.excitement = 80; imp.values.mischief = 80; imp.activations = 2;
   Model serious = imp; serious.values.mischief = 0;
   if (imp.mood() != Mood::Playful || serious.mood() == Mood::Playful) return false;
   const auto teasing = imp.behavior();
@@ -204,7 +205,7 @@ constexpr bool fasterRecovery() {
   m.restSecond();
   if (m.values.energy != 0 || m.values.annoyance != 100) return false;
   m.restSecond();
-  if (m.values.energy != 4 || m.values.annoyance != 88) return false;
+  if (m.values.energy != 4 || m.values.annoyance != 80) return false;
   for (int i = 2; i < 26; ++i) m.restSecond();
   if (m.values.energy != 100 || m.values.annoyance != 0 || m.values.patience != 100 || m.values.mischief != 25 || m.mood() != Mood::Happy) return false;
   for (int i = 26; i < 36; ++i) m.restSecond();
@@ -223,22 +224,41 @@ constexpr bool startSleepingAndWake() {
 }
 static_assert(startSleepingAndWake(), "Boot asleep; switch activation wakes the personality");
 constexpr bool sleepGlyphs() {
-  bool moves = false;
-  for (uint8_t phase = 0; phase < 8; ++phase) {
-    int count = 0;
-    for (uint8_t y = 0; y < 8; ++y)
-      for (uint8_t x = 0; x < 8; ++x) {
-        const bool lit = sleepAnimation::floatingZ(x,y,phase);
-        if (y >= 5 && lit) return false;
-        if (lit) ++count;
-        if (lit != sleepAnimation::floatingZ(x,y,(phase+1)%8)) moves = true;
-      }
-    if (count != 10) return false; // Complete 4x4 Z in every frame.
+  bool bothVisible=false, complete[2]={false,false}, exited[2]={false,false};
+  for(uint8_t phase=0;phase<sleepAnimation::Z_PHASES;++phase){
+    uint8_t counts[2]={0,0}; bool moves=false;
+    for(uint8_t y=0;y<8;++y)for(uint8_t x=0;x<8;++x){
+      const bool a=sleepAnimation::streamZ(x,y,phase,0), b=sleepAnimation::streamZ(x,y,phase,1);
+      if((y>=5 && (a||b)) || (a&&b))return false;
+      counts[0]+=a;counts[1]+=b;
+      if((a||b)!=sleepAnimation::floatingZ(x,y,(phase+1)%sleepAnimation::Z_PHASES))moves=true;
+    }
+    if(!moves || counts[0]+counts[1]==0)return false;
+    if(counts[0] && counts[1])bothVisible=true;
+    for(uint8_t i=0;i<2;++i){
+      if(counts[i]==10)complete[i]=true;
+      if(counts[i]==0)exited[i]=true;
+    }
   }
-  return moves;
+  return bothVisible && complete[0] && complete[1] && exited[0] && exited[1];
 }
-static_assert(sleepGlyphs(), "Zs must move, stay visible and never overlap the lower face");
-static_assert(sleepAnimation::startupFrame(0) == 0 && sleepAnimation::startupFrame(1599) == 15 && sleepAnimation::startupFrame(1600) == 15, "Startup frame bounds");
+static_assert(sleepGlyphs(), "Two readable Zs stream continuously offscreen without overlapping the face or each other");
+#include "startup_animation.h"
+static_assert(startupAnimation::frameAt(0)==0 && startupAnimation::frameAt(2399)==59 && startupAnimation::frameAt(2400)==59,"Startup frame bounds");
+static_assert(config::STARTUP_SETTLE_MS>=startupAnimation::DURATION_MS,"Homing gate must cover animation");
+constexpr bool colorfulStartup(){
+  bool red=false,green=false,blue=false;
+  for(uint8_t y=0;y<8;++y)for(uint8_t x=0;x<8;++x){
+    const auto c=startupAnimation::color(x,y,25);
+    if(c.r==0 && c.g==0 && c.b==0)return false;
+    if(c.r>c.g && c.r>c.b)red=true;
+    if(c.g>c.r && c.g>c.b)green=true;
+    if(c.b>c.r && c.b>c.g)blue=true;
+    if(startupAnimation::faceMix(x,y,39)!=0 || startupAnimation::faceMix(x,y,59)!=255)return false;
+  }
+  return red && green && blue;
+}
+static_assert(colorfulStartup(),"All 64 pixels light up with RGB variety, then fully dissolve to sleep");
 
 static_assert(sleepAnimation::glyph(2,1) && sleepAnimation::glyph(1,2), "Z needs a descending diagonal");
 static_assert(!sleepAnimation::glyph(1,1) && !sleepAnimation::glyph(2,2), "Diagonal must not resemble an S or I");
@@ -255,9 +275,45 @@ constexpr bool forgivingAndVaried() {
   curious.activations=2;const auto b=curious.behavior();
   curious.activations=3;const auto c=curious.behavior();
   if(a.approachMs==b.approachMs || b.approachMs==c.approachMs || a.pauseMs==c.pauseMs)return false;
-  Model playful; playful.values.excitement=60;playful.values.mischief=60;
+  Model playful; playful.playStreak=3; playful.values.excitement=60;playful.values.mischief=60;
   playful.activations=1;const auto p=playful.behavior();
   playful.activations=3;const auto q=playful.behavior();
-  return p.peekDeg==q.peekDeg && p.pauseMs<q.pauseMs && p.closedWaitMs<q.closedWaitMs && q.stepMs==0;
+  return p.peekDeg==q.peekDeg && p.pauseMs<q.pauseMs && p.hideWaitMs<q.hideWaitMs && q.stepMs==0;
 }
 static_assert(forgivingAndVaried(), "Spaced play cools anger; expressive variants keep strong pushes");
+
+#include "choreography.h"
+static_assert(choreography::bounded(), "Every gesture stays short of the push point");
+
+constexpr bool slowerPlayFasterFatigue() {
+  Model m;
+  m.values.curiosity=0; m.values.excitement=100; m.values.mischief=100;
+  m.activate(); if(m.mood()==Mood::Playful)return false;
+  m.activate(); if(m.mood()==Mood::Playful)return false;
+  m.activate(); if(m.mood()!=Mood::Playful)return false;
+  for(int i=0;i<8;++i)m.restSecond();
+  m.values.curiosity=0;m.values.excitement=100;m.values.mischief=100;
+  m.activate();if(m.playStreak!=1 || m.mood()==Mood::Playful)return false;
+  Model angry;angry.values.annoyance=100;
+  angry.restSecond();if(angry.values.annoyance!=100)return false;
+  angry.restSecond();angry.restSecond();angry.restSecond();if(angry.mood()==Mood::Annoyed || angry.mood()==Mood::Furious)return false;
+  angry.restSecond();angry.restSecond();if(angry.values.annoyance!=0)return false;
+  Model spaced;for(int i=0;i<9;++i){spaced.activate();for(int t=0;t<8;++t)spaced.restSecond();}
+  if(spaced.mood()==Mood::Tired)return false;
+  Model furious;furious.values.annoyance=90;
+  return furious.mood()==Mood::Furious; // Still available with enough energy.
+}
+static_assert(slowerPlayFasterFatigue(),"Warm up before playful; cool anger quickly; spaced play is less tiring");
+
+constexpr bool angerBeforeExhaustionWithGaps() {
+  Model m;
+  for(int poke=1;poke<=9;++poke){
+    m.activate();
+    if(poke==6 && m.mood()!=Mood::Annoyed)return false;
+    if((poke==7 || poke==8) && m.mood()!=Mood::Furious)return false;
+    if(poke==9 && m.mood()!=Mood::Tired)return false;
+    m.restSecond(); // A short gap must not erase the whole irritation increase.
+  }
+  return true;
+}
+static_assert(angerBeforeExhaustionWithGaps(),"One-second gaps still allow anger before fatigue");

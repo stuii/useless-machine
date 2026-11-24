@@ -3,6 +3,7 @@
 #include "config.h"
 
 namespace personality {
+enum class Routine : uint8_t { Greeting, Inspect, Distrust, FakeOut, Swat, DoubleJab, Creep };
 enum class Mood : uint8_t { Happy, Curious, Playful, Annoyed, Furious, Tired, Sleepy, Asleep, Suspicious };
 constexpr uint8_t add(uint8_t value, uint8_t amount) { return value + amount > 100 ? 100 : value + amount; }
 constexpr uint8_t sub(uint8_t value, uint8_t amount) { return value > amount ? value - amount : 0; }
@@ -21,7 +22,8 @@ struct Parameters {
 // A zero movement interval requests the target immediately (no software ramp).
 struct Behavior {
   uint16_t reactionMs; uint16_t stepMs; uint16_t approachMs; uint16_t pauseMs; uint16_t returnMs;
-  uint16_t closedWaitMs = config::MISCHIEF_CLOSED_WAIT_MS;
+  uint16_t hideWaitMs = config::MISCHIEF_HIDE_WAIT_MS;
+  Routine routine = Routine::Swat;
   int peekDeg = config::HOME_DEG + (config::PUSH_DEG - config::HOME_DEG) * 60 / 100;
 };
 
@@ -30,13 +32,15 @@ class Model {
   Parameters values;
   uint32_t quietMs = 0;
   uint16_t activations = 0;
+  uint8_t playStreak = 0; // Warm up again after a quiet break, not just once per boot.
 
   constexpr void startAsleep() { quietMs = config::SLEEP_AFTER_MS; }
 
   constexpr void activate() {
     const bool rapid = activations > 0 && quietMs < config::RAPID_POKE_WINDOW_MS;
+    playStreak = rapid ? (playStreak < config::PLAYFUL_MIN_POKES ? playStreak + 1 : playStreak) : 1;
     // Patience is tolerance for the NEXT poke, not the inverse of existing anger.
-    const uint8_t irritation = rapid ? 6 + (100 - values.patience) / 16 : 3;
+    const uint8_t irritation = rapid ? 10 + (100 - values.patience) / 20 : 3;
     values.annoyance = add(values.annoyance, irritation);
     values.patience = sub(values.patience, rapid ? 10 : 3);
     // Novelty piques curiosity; repetitive poking becomes boring.
@@ -44,7 +48,7 @@ class Model {
     // Playfulness grows while interaction is welcome, then fades under stress.
     values.mischief = values.annoyance < config::ANNOYED_THRESHOLD
         ? add(values.mischief, rapid ? 8 : 16) : sub(values.mischief, 12);
-    values.energy = sub(values.energy, 4);
+    values.energy = sub(values.energy, rapid ? config::ENERGY_COST_REPEATED : config::ENERGY_COST_SPACED);
     values.excitement = add(values.excitement, rapid ? 24 : 20);
     if (activations < 65535) ++activations;
     quietMs = 0;
@@ -54,8 +58,9 @@ class Model {
   constexpr void restSecond() {
     if (quietMs < 300000UL) quietMs += 1000;
     values.excitement = sub(values.excitement, config::EXCITEMENT_DECAY_PER_SECOND);
-    if (quietMs >= config::RECOVERY_DELAY_MS) {
+    if (quietMs >= config::ANNOYANCE_RECOVERY_DELAY_MS)
       values.annoyance = sub(values.annoyance, config::ANNOYANCE_RECOVERY_PER_SECOND);
+    if (quietMs >= config::RECOVERY_DELAY_MS) {
       values.energy = add(values.energy, config::ENERGY_RECOVERY_PER_SECOND);
       values.patience = add(values.patience, config::PATIENCE_RECOVERY_PER_SECOND);
       if (values.curiosity < 70) {
@@ -82,7 +87,8 @@ class Model {
     if (values.annoyance >= config::ANNOYED_THRESHOLD) return Mood::Annoyed;
     if (quietMs >= config::SLEEPY_AFTER_MS && values.excitement < 20) return Mood::Sleepy;
     if (values.annoyance >= 15 && values.curiosity >= 45 && values.excitement >= 10) return Mood::Suspicious;
-    if (values.excitement >= 35 && values.mischief >= 35) return Mood::Playful;
+    if (playStreak >= config::PLAYFUL_MIN_POKES
+        && values.excitement >= config::PLAYFUL_EXCITEMENT_THRESHOLD && values.mischief >= 35) return Mood::Playful;
     if (values.curiosity >= 45 && values.excitement >= 10) return Mood::Curious;
     return Mood::Happy;
   }
@@ -152,8 +158,14 @@ class Model {
     }
     if (current == Mood::Playful) {
       b.pauseMs += variant * 200;
-      b.closedWaitMs += variant * 200;
+      b.hideWaitMs += variant * 200;
     }
+    if (current == Mood::Happy) { b.routine = Routine::Greeting; b.pauseMs = 250; }
+    if (current == Mood::Curious) b.routine = Routine::Inspect;
+    if (current == Mood::Suspicious) b.routine = Routine::Distrust;
+    if (current == Mood::Playful) b.routine = Routine::FakeOut;
+    if (current == Mood::Furious) b.routine = Routine::DoubleJab;
+    if (current == Mood::Tired || current == Mood::Sleepy || current == Mood::Asleep) b.routine = Routine::Creep;
     return b;
   }
 };

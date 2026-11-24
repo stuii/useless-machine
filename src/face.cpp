@@ -9,6 +9,7 @@
 #include "matrix.h"
 #include "face_transition.h"
 #include "sleep_animation.h"
+#include "startup_animation.h"
 #if !defined(__AVR_ATmega328P__) || F_CPU != 16000000UL
 #error "Face/servo scheduling requires the classic 16 MHz ATmega328P Nano."
 #endif
@@ -22,7 +23,7 @@ faceAnimation::Transition transition;
 bool booting = true;
 uint32_t bootSince = 0;
 uint8_t bootFrame = 255;
-static_assert(config::STARTUP_SETTLE_MS >= sleepAnimation::DURATION_MS, "Startup must cover the intro animation");
+static_assert(config::STARTUP_SETTLE_MS >= startupAnimation::DURATION_MS, "Startup must cover the intro animation");
 
 uint32_t ink(char part, uint8_t mood, uint8_t brightness) {
   uint8_t r = pgm_read_byte(&faceArt::palettes[mood][0]);
@@ -73,39 +74,53 @@ void drawTransition() {
   }
 }
 
-void drawStartup(uint8_t frame) {
-  pixels.clear();
-  if (frame < 8) {
-    // A small cyan light expands into a diamond, then contracts.
-    const uint8_t radius = frame < 4 ? frame : 7 - frame;
-    for (uint8_t y = 0; y < 8; ++y)
-      for (uint8_t x = 0; x < 8; ++x) {
-        const uint8_t distance = abs(int(x) - 3) + abs(int(y) - 3);
-        if (distance == radius) put(x, y, pixels.Color(30, 100, 180));
-      }
-  } else {
-    // Reveal the sleeping face softly, ending near its breathing brightness.
-    draw(7, false, false, 10 + (frame - 8) * 7);
+constexpr uint32_t SLEEP_Z_COLOR = 0x0C131F; // Fixed dim blue, independent of breathing.
+
+uint8_t sleepZPhase(uint32_t now) {
+  return config::SLEEP_Z_STATIC_TEST ? 3
+      : (now / sleepAnimation::Z_FRAME_MS) % sleepAnimation::Z_PHASES;
+}
+
+uint8_t sleepBreath(uint32_t now) {
+  const uint8_t phase = (now / 500) % 8;
+  return 35 + (phase < 4 ? phase : 7 - phase) * 10;
+}
+
+void drawStartup(uint8_t frame, uint32_t now) {
+  // Use the live sleeping scene as the fade target, including its moving Zs.
+  // The same clock and color continue after startup, without a separate reveal.
+  const uint8_t zPhase = sleepZPhase(now);
+  const uint8_t breath = sleepBreath(now);
+  for (uint8_t y=0;y<8;++y) {
+    for (uint8_t x=0;x<8;++x) {
+      const auto c=startupAnimation::color(x,y,frame);
+      const uint8_t mix=startupAnimation::faceMix(x,y,frame);
+      const uint32_t asleep=sleepAnimation::floatingZ(x,y,zPhase)
+          ? SLEEP_Z_COLOR : pixel(x,y,7,false,false,breath);
+      put(x,y,pixels.Color(
+          faceAnimation::mix(c.r,(asleep>>16)&255,mix),
+          faceAnimation::mix(c.g,(asleep>>8)&255,mix),
+          faceAnimation::mix(c.b,asleep&255,mix)));
+    }
   }
 }
 
-void drawZs(uint8_t phase, uint8_t breath) {
+void drawZs(uint8_t phase) {
   for (uint8_t y = 0; y < 5; ++y)
     for (uint8_t x = 0; x < 8; ++x)
       if (sleepAnimation::floatingZ(x, y, phase))
-        put(x, y, pixels.Color(30, 65 + breath, 110 + breath));
+        // Fixed dim blue, below even the sleeping face's darkest breathing phase.
+        put(x, y, SLEEP_Z_COLOR);
 }
 
 bool inServoGap() {
-  // Two Servo 1.2.2 channels use at most 2 * 2.4 = 4.8 ms per
-  // 20 ms frame at 16 MHz. Wait until 6 ms; a 64-pixel transfer takes
-  // ~1.92 ms and must start by 14 ms. Also covers startup's inactive slots.
-  // Both signals must be LOW. Revisit for a third Servo object.
+  // One Servo 1.2.2 channel: at most 2.4 ms of pulses per 20 ms frame.
+  // Start the ~1.92 ms LED transfer at 4..14 ms, with the signal LOW.
+  // Revisit before adding Servo objects or changing timer libraries.
   uint16_t ticks;
   ATOMIC_BLOCK(ATOMIC_RESTORESTATE) { ticks = TCNT1; }
-  return ticks >= 12000 && ticks <= 28000
-      && digitalRead(config::ARM_SERVO_PIN) == LOW
-      && digitalRead(config::LID_SERVO_PIN) == LOW;
+  return ticks >= 8000 && ticks <= 28000
+      && digitalRead(config::ARM_SERVO_PIN) == LOW;
 }
 }
 
@@ -116,7 +131,7 @@ void face::begin() {
   transition.target = 7;
   bootSince = millis();
   booting = true;
-  drawStartup(0);
+  drawStartup(0, bootSince);
   bootFrame = 0;
   pixels.show(); // Before attaching Servo.
 }
@@ -126,10 +141,10 @@ void face::update(uint32_t now, personality::Mood emotion, bool reacting) {
   if (mood >= 9) return;
   if (booting) {
     const uint32_t age = now - bootSince;
-    if (age < sleepAnimation::DURATION_MS) {
-      const uint8_t frame = sleepAnimation::startupFrame(age);
+    if (age < startupAnimation::DURATION_MS) {
+      const uint8_t frame = startupAnimation::frameAt(age);
       if (frame == bootFrame || sound::toneActive()) return;
-      drawStartup(frame);
+      drawStartup(frame, now);
       if (!inServoGap()) return;
       pixels.show();
       bootFrame = frame;
@@ -164,13 +179,12 @@ void face::update(uint32_t now, personality::Mood emotion, bool reacting) {
   const bool eyebrow = reacting && mood <= 2;
   // Slow eight-step breathing only while asleep; no full-panel flashes.
   const uint8_t phase = emotion == personality::Mood::Asleep ? (now / 500) % 8 : 0;
-  const uint8_t breath = emotion == personality::Mood::Asleep
-      ? 35 + (phase < 4 ? phase : 7 - phase) * 10 : 100;
-  const uint8_t zPhase = emotion == personality::Mood::Asleep && !config::SLEEP_Z_STATIC_TEST ? (now / 220) % 8 : 0;
+  const uint8_t breath = emotion == personality::Mood::Asleep ? sleepBreath(now) : 100;
+  const uint8_t zPhase = emotion == personality::Mood::Asleep ? sleepZPhase(now) : 3;
   const uint16_t key = (uint16_t(zPhase) << 9) | mood | (blink ? 16 : 0) | (eyebrow ? 32 : 0) | (phase << 6);
   if (key == displayedKey || sound::toneActive()) return; // Avoid audio clicks from LED interrupt masking.
   draw(mood, blink, eyebrow, breath);
-  if (emotion == personality::Mood::Asleep) drawZs(zPhase, breath);
+  if (emotion == personality::Mood::Asleep) drawZs(zPhase);
   if (!inServoGap()) return;
   pixels.show();
   displayedKey = key;

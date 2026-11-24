@@ -1,22 +1,21 @@
 #pragma once
 #include <stdint.h>
 namespace sleepAnimation {
-constexpr uint16_t FRAME_MS = 100;
-constexpr uint8_t FRAMES = 16;
-constexpr uint16_t DURATION_MS = FRAME_MS * FRAMES;
-constexpr uint8_t startupFrame(uint32_t elapsed) {
-  return elapsed >= DURATION_MS ? FRAMES - 1 : elapsed / FRAME_MS;
-}
+constexpr uint16_t Z_FRAME_MS = 160;
+constexpr uint8_t Z_PHASES = 10;
 // Four rows make the diagonal readable: #### / ..#. / .#.. / ####.
 constexpr bool glyph(int x, int y) {
   return x >= 0 && x < 4 && y >= 0 && y < 4
       && (y == 0 || y == 3 || x == 3 - y);
 }
-constexpr bool floatingZ(uint8_t x, uint8_t y, uint8_t phase) {
-  // One complete letter; never overlap glyphs or crop the horizontal strokes.
-  // Drift right and up, leaving eyes on row 5 and mouth on row 7 untouched.
+constexpr bool streamZ(uint8_t x, uint8_t y, uint8_t phase, uint8_t letter) {
+  // Two lanes, half a cycle apart. Letters emerge above the face and travel
+  // completely past the top edge before restarting; clipping is intentional.
   if (y >= 5) return false;
-  phase %= 8;
-  return glyph(int(x) - (1 + phase / 3), int(y) - (phase < 4 ? 1 : 0));
+  const uint8_t age = (phase + letter * (Z_PHASES / 2)) % Z_PHASES;
+  return glyph(int(x) - letter * 4, int(y) - (4 - int(age)));
+}
+constexpr bool floatingZ(uint8_t x, uint8_t y, uint8_t phase) {
+  return streamZ(x, y, phase, 0) || streamZ(x, y, phase, 1);
 }
 }

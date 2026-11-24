@@ -4,13 +4,6 @@
 namespace config {
 constexpr uint8_t SWITCH_PIN = 4; // Switch closes to GND when ON.
 constexpr uint8_t ARM_SERVO_PIN = 9;
-constexpr uint8_t LID_SERVO_PIN = 11;
-// Starting guesses: calibrate with horns/linkages removed before assembly.
-constexpr int LID_CLOSED_DEG = 60;
-constexpr int LID_OPEN_DEG = 110;
-constexpr uint16_t LID_STEP_MS = 6;
-constexpr uint32_t LID_SETTLE_MS = 400;
-constexpr uint32_t STARTUP_ARM_SETTLE_MS = 800;
 constexpr uint8_t FACE_PIN = 7;
 constexpr uint8_t PIEZO_PIN = 8;
 constexpr bool SOUND_ENABLED = true; // Set false to mute.
@@ -24,9 +17,14 @@ constexpr bool SLEEP_Z_STATIC_TEST = false; // true freezes Z motion to diagnose
 constexpr uint32_t RECOVERY_DELAY_MS = 2000; // Quiet time before recovery starts.
 constexpr uint32_t RAPID_POKE_WINDOW_MS = 8000; // Keep repeated-poking sensitivity separate.
 constexpr uint8_t ANNOYED_THRESHOLD = 55;
-constexpr uint8_t FURIOUS_THRESHOLD = 85;
+constexpr uint8_t FURIOUS_THRESHOLD = 75;
 constexpr uint8_t ENERGY_RECOVERY_PER_SECOND = 4;
-constexpr uint8_t ANNOYANCE_RECOVERY_PER_SECOND = 12;
+constexpr uint8_t ANNOYANCE_RECOVERY_PER_SECOND = 20;
+constexpr uint32_t ANNOYANCE_RECOVERY_DELAY_MS = 2000;
+constexpr uint8_t PLAYFUL_EXCITEMENT_THRESHOLD = 60;
+constexpr uint8_t PLAYFUL_MIN_POKES = 3;
+constexpr uint8_t ENERGY_COST_SPACED = 4;
+constexpr uint8_t ENERGY_COST_REPEATED = 8;
 constexpr uint8_t PATIENCE_RECOVERY_PER_SECOND = 5;
 constexpr uint8_t EXCITEMENT_DECAY_PER_SECOND = 4;
 constexpr uint8_t CURIOSITY_RECOVERY_PER_SECOND = 2;
@@ -44,7 +42,7 @@ constexpr uint16_t TIRED_CREEP_MS = 18; // One degree per step; ~1.4 seconds fro
 constexpr uint16_t TIRED_PAUSE_MS = 900;
 constexpr int MISCHIEF_PEEK_DEG = 80;
 constexpr uint16_t MISCHIEF_PEEK_PAUSE_MS = 700; // Includes time to reach the fast peek target.
-constexpr uint16_t MISCHIEF_CLOSED_WAIT_MS = 650;
+constexpr uint16_t MISCHIEF_HIDE_WAIT_MS = 650;
 static_assert((HOME_DEG > PUSH_DEG && MISCHIEF_PEEK_DEG < HOME_DEG && MISCHIEF_PEEK_DEG > PUSH_DEG)
     || (HOME_DEG < PUSH_DEG && MISCHIEF_PEEK_DEG > HOME_DEG && MISCHIEF_PEEK_DEG < PUSH_DEG),
     "Mischief peek must be between rest and push");
@@ -54,19 +52,20 @@ static_assert((HOME_DEG > PUSH_DEG && TIRED_PEEK_DEG < HOME_DEG && TIRED_PEEK_DE
 constexpr uint16_t ARM_STEP_PERCENT = 10; // Scale the remaining ramped movements.
 static_assert(ARM_STEP_PERCENT > 0 && ARM_STEP_PERCENT <= 100, "Arm speed scale must be 1..100 percent");
 constexpr uint32_t DEBOUNCE_MS = 30;
+constexpr uint16_t RESPONSE_PAUSE_MS = 400; // Let the interaction sound lead every arm response.
 constexpr uint32_t REACTION_MS = 250; // Happy reaction pause.
 constexpr uint32_t STEP_MS = 20; // One degree per step; larger is slower.
 constexpr uint32_t PUSH_HOLD_MS = 500;
+constexpr uint16_t GESTURE_SETTLE_MS = 250;
+constexpr uint16_t FURIOUS_RECOIL_MS = 300;
 constexpr uint32_t HOME_SETTLE_MS = 500;
-constexpr uint32_t STARTUP_SETTLE_MS = 1600;
+constexpr uint32_t STARTUP_SETTLE_MS = 2400;
 static_assert(HOME_DEG >= 0 && HOME_DEG <= 180, "Invalid home angle");
 static_assert(PUSH_DEG >= 0 && PUSH_DEG <= 180, "Invalid push angle");
 static_assert(HOME_DEG != PUSH_DEG, "Arm needs two different positions");
-static_assert(STEP_MS > 0 && LID_STEP_MS > 0, "Step intervals must be positive");
-static_assert(LID_CLOSED_DEG >= 0 && LID_CLOSED_DEG <= 180 && LID_OPEN_DEG >= 0 && LID_OPEN_DEG <= 180 && LID_CLOSED_DEG != LID_OPEN_DEG, "Invalid lid angles");
 constexpr bool pinsUnique() {
-  const uint8_t pins[] = {SWITCH_PIN, ARM_SERVO_PIN, LID_SERVO_PIN, FACE_PIN, PIEZO_PIN};
-  for (uint8_t i=0;i<5;++i) for (uint8_t j=i+1;j<5;++j) if (pins[i] == pins[j]) return false;
+  const uint8_t pins[] = {SWITCH_PIN, ARM_SERVO_PIN, FACE_PIN, PIEZO_PIN};
+  for (uint8_t i=0;i<4;++i) for (uint8_t j=i+1;j<4;++j) if (pins[i] == pins[j]) return false;
   return true;
 }
 static_assert(pinsUnique(), "Each connected device needs a unique pin");
