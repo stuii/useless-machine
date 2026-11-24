@@ -1,141 +1,152 @@
 # Useless machine
 
-Assembled box using a classic 5 V / 16 MHz ATmega328P Nano clone, **one arm servo**, one maintained switch, an 8×8 WS2812B face and a passive piezo. There is no lid or pivot servo. D11 is unused.
+A switch-flipping box with a personality: one servo arm, an 8x8 RGB face, and a passive piezo. Repeated poking changes its mood and behavior; leaving it alone lets it recover and fall asleep.
 
-## Wiring and power
+The firmware is C++ for a classic 5 V, 16 MHz ATmega328P Arduino Nano clone, built with PlatformIO in VS Code.
 
-| Component | Nano connection |
+## Hardware and wiring
+
+[View the schematic](docs/schematic.png) | [Scalable SVG](docs/schematic.svg)
+
+| Component | Connection |
 |---|---|
-| Switch | D4 to switch to GND; INPUT_PULLUP, LOW = ON |
-| Arm servo signal | D9 |
-| WS2812B DIN | D7 through a 330–470 ohm resistor |
-| Passive piezo | D8 through 330 ohms to +; other lead to GND |
-| Onboard L LED | D13 held LOW while firmware runs |
+| Maintained switch | D4 to switch to GND; internal pull-up, LOW means ON |
+| Arm servo | Signal on D9; power from the 5 V rail |
+| 8x8 WS2812B grid | DIN on D7 through a 330-470 ohm resistor; power from the 5 V rail |
+| Passive piezo | D8 through 330 ohms to positive lead; other lead to GND |
 
-Use an external regulated 5 V supply appropriate for the servo, with enough current for its stall current plus the LED grid. Feed the servo/grid directly from the supply rails; don't route motor current through the Nano's USB/regulator. Connect every ground together. Use short, adequate copper power distribution on perfboard. Add 500–1000 µF across the grid supply near its connector, correct polarity and voltage rating above 5 V. Capacitors don't replace an adequate supply.
+Connect all grounds together. Use an external regulated 5 V supply sized for the servo's stall current plus the grid. Feed the servo and grid directly from the supply rails, with short power connections. Place a 500-1000 uF capacitor across the grid supply near its connector, observing polarity and using a voltage rating above 5 V.
 
-For USB programming, keep the external positive rail separate from the USB-powered Nano's 5V pin unless power isolation is verified. A standalone regulated 5 V rail can feed the classic Nano's 5V pin; it must not also be connected to an unverified USB power source. Do not feed regulated 5 V through VIN. D5, D6, D10 and D11 are unused. The power LED and bootloader LED flashes cannot be disabled by this sketch.
+For USB programming, keep the external positive rail separate from the USB-powered Nano's 5V pin unless power isolation is verified. For standalone operation, the regulated rail can also feed the Nano's 5V pin. Do not feed regulated 5 V through VIN or route servo current through the Nano's USB connection or regulator.
 
-## VS Code / PlatformIO
+The firmware holds the onboard D13 LED LOW. The power LED and bootloader activity are independent of the sketch.
 
-1. Install VS Code and the PlatformIO IDE extension (recommended by this project).
-2. Open this folder and let PlatformIO install the AVR platform and the pinned Servo and Adafruit NeoPixel libraries.
-3. Run **PlatformIO: Build**. The configured environment is nanoatmega328new (new bootloader), matching your current project settings.
-4. Connect the Nano, then run **PlatformIO: Upload**. If your board needs the old bootloader, change board to nanoatmega328 in both places in platformio.ini. This changes bootloader/upload settings, not the wiring.
-5. Open **PlatformIO: Serial Monitor** at 115200 baud. Close other serial applications before uploading.
+## Build and upload
 
-Commands in a PlatformIO terminal:
+1. Install VS Code and the PlatformIO IDE extension.
+2. Open this folder. PlatformIO installs the AVR platform and the pinned libraries: Servo 1.2.2 and Adafruit NeoPixel 1.12.3.
+3. Run **PlatformIO: Build**, then **PlatformIO: Upload** with the Nano connected.
+4. Open **PlatformIO: Serial Monitor** at 115200 baud.
 
-~~~sh
-pio run
+The configured environment is `nanoatmega328new`. From a PlatformIO terminal:
+
+```sh
+pio run -e nanoatmega328new
 pio run -e nanoatmega328new -t upload
 pio device monitor -b 115200
-~~~
+```
 
-Ports are auto-detected. If multiple serial devices are present, add upload_port and monitor_port (for example COM5) under [env] in platformio.ini. Find the correct port in Device Manager or with pio device list. A clone may need a USB-serial driver matching its actual chip (often CH340); obtain it from the chip vendor. This configuration assumes ATmega328P, not an ATmega168 or another Nano-family MCU.
+Ports are auto-detected. If needed, set `upload_port` and `monitor_port` under `[env]` in [platformio.ini](platformio.ini). Use `pio device list` to find the port, and close other serial applications before uploading.
 
-## Calibration and startup
+## Operation and calibration
 
-Current arm endpoints in include/config.h: **HOME_DEG = 180°**, **PUSH_DEG = 60°**. The actual switch push is a direct target command in every active mood; this requests available servo speed, not extra motor torque. Gesture positions must remain clear of switch contact and mechanical stops. Firmware knows commanded positions, not actual shaft position or current.
+The arm rests at **180 degrees** and pushes the switch at **60 degrees**. These endpoints and other settings are in [include/config.h](include/config.h).
 
-Startup immediately commands home during the silent 2.4-second face intro. Interaction begins after that settling period. The personality starts asleep. An ON switch at boot gets one routine after startup; an OFF switch leaves the arm resting. The arm remains attached at home. Verify travel without a connected linkage before changing calibration, and disconnect power if the mechanism stalls against a stop.
+On power-up, the arm is commanded home while a silent 2.4-second rainbow animation fills the grid and fades into the sleeping face. The machine starts asleep. A switch already ON at startup triggers one response after the intro.
 
-Every accepted switch activation starts its sound immediately, then holds the current arm target for **400 ms** before responding (RESPONSE_PAUSE_MS). This also applies to rapid re-flips and angry modes. OFF during this pause cancels the response; retraction is not delayed. Existing mood-specific gestures and pauses follow the lead-in.
+Each accepted ON starts a mood-specific sound and waits **400 ms** before issuing an arm movement. The response can include gestures and additional pauses before the push. A stable OFF stops the sound, cancels pending gestures or jabs, and retracts the arm. Switch debounce is **30 ms**. A fresh OFF-to-ON can interrupt the current response.
 
-## Distinct mood routines
+Actual pushes command 60 degrees directly, without a software speed ramp. Each push is held for at most 500 ms; returning home includes 500 ms settling. A switch held ON does not trigger endless retries. The arm stays attached at home, including during sleep.
 
-| Mood | Movement sequence |
-|---|---|
-| Happy | Friendly bob: 180° → 160° → 180°, with 250 ms at each stop, then a fast push |
-| Curious | Approach 108°, inspect; creep closer to 90°, inspect for 300 ms; then slam |
-| Suspicious | Creep to 108°, hesitate; withdraw to 150°, wait 400 ms; then lunge |
-| Playful / mischievous | Dart to 80°, pause, fully retract and settle, hide briefly, then slam; no lid movement |
-| Annoyed | Single swat after the sound lead-in and return |
-| Furious | Swat after the sound lead-in; if still ON after 500 ms, recoil to 108°, wait 300 ms, jab once more; then return |
-| Tired | **Slow 18 ms/degree creep to 100°**, pause **900 ms**, slam the final 40° to 60°, then return slowly |
+The firmware tracks commanded angles, not shaft position or force. Check linkage clearance when calibrating: preliminary gestures must remain short of switch contact, and neither endpoint should force the servo against a mechanical stop.
 
-Every successful switch-OFF cancels remaining motion and returns home after 30 ms debounce. Furious never performs its second jab after OFF; a failed routine has at most two jabs and then waits for OFF. Other moods get one actual push per activation. Each push has a 500 ms timeout; return has 500 ms settling. Direct commands need physical travel time; verify these waits on the mechanism.
+## Moods and movement
 
-A fresh OFF→ON replaces the current routine. Rapid re-flips run the newly selected full variation after the sound lead-in; they no longer skip the gestures. **Tired always preserves its slow approach and 900 ms pause**, including rapid repeats. If interrupted at or beyond its 100° peek, it first returns home and settles before creeping again. All motion is nonblocking; switch sampling, sound and face animations keep running.
+Each active mood has three rotating movement sequences. Its rotation starts at variant 2 and continues 3, 1, 2. The serial monitor prints the selected variant. Special interaction tricks can take precedence over these sequences.
 
-Curious approaches vary between 6/3/0 ms per degree with 120/240/350 ms first pauses. Suspicious uses 8/5/10 ms per degree and 250/400/550 ms first pauses. Playful keeps its 80° fake-out, varying peek waits between 700/900/1100 ms and hiding between 650/850/1050 ms. These variants rotate per activation; they do not replace the mood's distinctive sequence. Sleepy/asleep faces occur during quiet rest, but their motion profiles are normally unreachable because an activation wakes the personality first.
+| Mood | Variant 1 | Variant 2 | Variant 3 |
+|---|---|---|---|
+| Happy | Friendly bob, retract, push | Two greeting bobs at different heights | Bow forward, wind back, swat |
+| Curious | Inspect at 108 degrees, move closer to 90, then push | Approach, retreat, look closer, retreat again | Three-step approach with a second inspection |
+| Suspicious | Approach 108 degrees, withdraw to 150, hesitate, lunge | Startle, hide, cautiously reappear | Abort two approaches, hide, then return |
+| Playful | Dart to 80 degrees, pause, hide, slam | Two 80-degree fake-outs and a small peek | Hide for a long beat, peek twice, slam |
+| Annoyed | Single swat | Two impatient air-knocks, then swat | Stare near the switch, withdraw, swat |
+| Furious | Swat, with a second jab if still ON | Short wind-up shake before attacking | Charge, brake, recoil, attack |
+| Tired | Slow creep, pause, slam | Two sleepy nods before creeping | Two droopy false starts before creeping |
 
-## Three routines per mood
+Tired always creeps to **100 degrees at 18 ms per degree**, pauses for **900 ms**, then slams to 60 degrees and retracts slowly. If interrupted at or beyond the creep stop, it returns home before starting that approach again.
 
-Each mood has its own three-entry rotation, so coming back to that mood advances to a different sequence. Each mood starts with expressive variant 2, then rotates 3 → 1 → 2. The serial monitor prints Motion variant=1/2/3. Variant 1 uses the familiar sequence above; variants 2 and 3 use the flash-stored choreography in include/choreography.h:
+Furious allows at most two actual pushes per activation. If the switch remains ON after the first push, it recoils to 108 degrees, waits 300 ms, and jabs again. OFF cancels the second jab. Other routines make one actual push.
 
-| Mood | Variant 2 | Variant 3 |
-|---|---|---|
-| Happy | Two enthusiastic greeting bobs, each a different height | Bow forward, wind back, then release into a swat |
-| Curious | Double take: approach, pull back, look closer, pull back again | Approach in three steps, think, back up, inspect once more |
-| Suspicious | Startle at the switch, hide fully, cautiously reappear | Abort two approaches, disappear, return for a surprise lunge |
-| Playful | Two full 80° fake-outs, then a tiny peek before the real attack | Disappear for a long beat, peek out twice, then spring from hiding |
-| Annoyed | Two impatient air-knocks short of contact, then swat | Freeze near the switch, pull back, then swat |
-| Furious | Short wind-up shake before the bounded attack | Charge toward the switch, brake, recoil fully, attack |
-| Tired | Nod off twice and restart | Two droopy false starts before the final slow approach |
+Sleepy and asleep are resting expressions. An activation wakes the personality and selects its response from the updated parameters.
 
-These are movement sequences, not just randomized delays. All preliminary gestures stay short of the push endpoint; playful's near-switch stop remains exactly 80°. Tired variants always continue with the slow creep to 100°, the 900 ms pause, and the direct 60° push. Every furious variant still allows at most two actual pushes, and a successful OFF cancels the second. Some gestures deliberately hide for up to 1.4 seconds. Tests cannot guarantee physical non-contact at an intermediate angle: check the assembled mechanism.
+## Interaction tricks
 
-The 400 ms sound lead-in is always applied. Quick re-flips retain the full selected variation, including tired’s slow approach. OFF cancels any script immediately after debounce. No extra sounds or personality activations are generated by individual gestures. Only one step is stored in RAM; the 14 new scripts live in flash.
+- **I saw that coming:** every third consecutive quick re-flip earns a knowing wink, a dart to 80 degrees, a 550 ms stare, then a push. A quick re-flip means ON within 1.2 seconds of OFF; a slower one resets the streak. Tired keeps its creep routine.
+- **Fake sleep:** every second playful encounter stays home with closed eyes for 1.3 seconds, opens one eye for 650 ms, then slams. Anticipation takes precedence if both qualify.
+- **Victory celebrations:** an OFF edge while holding a push qualifies for a celebration after retraction. The first three celebrations per power-up are wink/confetti, a pulsing heart, and colorful border confetti. Each lasts 1.4 seconds, stays silent, and keeps the arm home. Another ON interrupts it.
+- **Dreaming:** after 12 seconds continuously asleep, a dim heart, star, or switch fades above the sleeping face for 3.2 seconds. Dreams repeat every 18 seconds, cycling through the pictures. Moving Zs return between dreams. The arm stays still and the piezo stays silent.
 
 ## Personality and recovery
 
-| Parameter | Changes |
-|---|---|
-| Energy | Starts 90; spaced activation costs 4; repeated activation costs 8; quiet recovery adds 4/second; ≤25 selects tired |
-| Annoyance | Spaced poke +3; repeated poke +10…15 depending on patience; recovery −20/second starting after two quiet seconds |
-| Excitement | Spaced poke +20, repeated poke +24; quiet −4/second |
-| Curiosity | Starts 40; spaced +22, repeated −12; recovery +2/second toward 70 |
-| Patience | Starts 80; spaced −3, repeated −10; recovery +5/second |
-| Mischief | Starts 25; enjoyable pokes +8…16, irritating pokes −12; recovery moves 3/second toward 25 |
+Six parameters range from 0 to 100. Repeated poking means another activation before eight seconds of quiet rest; this is separate from the 1.2-second anticipation window.
 
-Repeated poking means another activation before eight seconds of idle rest. Anger cooldown starts after **2 seconds continuously idle and OFF**; other recovery starts after 2 seconds. Annoyed begins at 55 annoyance; furious at 75, unless exhausted. A fresh model with no recovery reaches annoyed around poke six, furious around poke seven, and tired around poke nine (previously seventeen). Fatigue takes priority over fury. Four quiet seconds take maximum annoyance below 55, and six clear it. Energy recovers from zero by 26 quiet seconds; curiosity from zero by 36. Holding ON or moving prevents recovery.
+| Parameter | Initial value | Interaction | Quiet recovery per second |
+|---|---|---|---|
+| Energy | 90 | -4 spaced; -8 repeated | +4 |
+| Annoyance | 0 | +3 spaced; +10 to +15 repeated, depending on patience | -20 |
+| Excitement | 0 | +20 spaced; +24 repeated | -4 |
+| Curiosity | 40 | +22 spaced; -12 repeated | +2 when below 70, capped at 70 |
+| Patience | 80 | -3 spaced; -10 repeated | +5 |
+| Mischief | 25 | +16 spaced or +8 repeated while annoyance is below 55; otherwise -12 | Moves 3 toward 25 |
 
-Playful now requires at least **three pokes in a play streak**, excitement ≥60 and mischief ≥35. Eight quiet seconds reset that warm-up on the next activation, so high leftover excitement cannot jump straight back into playful. Other mood priorities still apply.
+Recovery requires the arm to be idle and the switch OFF. Excitement decreases each quiet second; the other changes start at two quiet seconds. Holding ON or running a movement prevents recovery.
 
-Calm machines become sleepy after 30 quiet seconds and asleep after 60. Sleep does not switch off servo power. Startup resets personality; no EEPROM storage. The serial monitor at 115200 baud prints mood and all six parameters on activation, mood changes and every five seconds. See docs/personality-flowchart.md for the decision graph.
+Annoyance at 55 selects annoyed; at 75 it selects furious. Energy at or below 25 selects tired ahead of anger. Playful needs at least three pokes in a streak, excitement of at least 60, and mischief of at least 35; higher-priority moods can still win. Eight quiet seconds reset the streak on the next activation.
+
+With suitable calm parameters, 30 quiet seconds lead to sleepy and 60 to asleep. Personality resets on power-up and is not stored in EEPROM. The serial monitor reports the mood and all six parameters on activation, on mood changes, and every five seconds.
+
+See [the personality flowchart](docs/personality-flowchart.md) for the full mood priorities and behavior paths.
 
 ## Face and sound
 
-The face uses nine expressions and animated eye-close / blend / eye-open transitions, plus blinking and breathing. Asleep shows two staggered 4×4 Zs in separate lanes above the face. They advance upward every 160 ms (previously 220 ms), clip naturally at the top, fully exit, and reappear above the eyes in a continuous stream. Startup fills the whole 8×8 panel with a diagonal rainbow ignition and moving color ripples, then dissolves into the sleeping face over 2.4 seconds (60 frames at 40 ms). The effect uses the existing brightness limit and servo-safe update window. The panel uses straight rows (MATRIX_SERPENTINE=false); rotation and mirroring are configurable. Current FACE_BRIGHTNESS is 10/255. SLEEP_Z_STATIC_TEST freezes the Z for orientation checks.
+The grid displays nine mood expressions with blinking, breathing, and eye-close/blend/eye-open transitions. Sleep has two staggered 4x4 Zs moving upward every 160 ms. They clip at the panel edge and keep a fixed dim blue color independent of breathing.
 
-WS2812B transmission masks interrupts for about 1.92 ms. With **one Servo 1.2.2 object on a 16 MHz ATmega328P**, transfers start at **4–14 ms** of the 20 ms timer frame, only while D9 is LOW. Revisit this timing if adding Servo objects or changing timer libraries. Timer1 controls the servo; Arduino tone uses Timer2. Face updates avoid audible tones to protect both sound and servo pulses.
+The panel uses straight rows, no rotation, and no mirroring. Brightness is **10/255**. Configuration options in `include/config.h` include:
 
-The passive piezo uses mood-specific phrases with 4 ms pitch updates. Sound starts only on accepted interaction and stops on OFF; startup, sleep and recovery are silent. Multi-stage routines do not create additional activations or sounds. SOUND_ENABLED=false mutes the project.
+| Setting | Purpose |
+|---|---|
+| `FACE_BRIGHTNESS` | Overall LED brightness |
+| `MATRIX_SERPENTINE` | Straight or alternating row wiring |
+| `MATRIX_ROTATION` | Clockwise quarter-turns, 0 to 3 |
+| `MATRIX_MIRROR` | Horizontal mirroring |
+| `SLEEP_Z_STATIC_TEST` | Freeze Z motion for orientation checks |
+| `SOUND_ENABLED` | Enable or mute the piezo |
+
+The passive piezo plays mood-specific phrases with 4 ms pitch updates. Sound starts only on accepted interaction and stops on OFF. Startup, recovery, sleep, dreams, and celebrations are silent.
+
+Servo timing uses Timer1; Arduino `tone` uses Timer2. WS2812B transfers start within the 4-14 ms portion of the servo's 20 ms frame while D9 is LOW, and face updates avoid active audible tones. This scheduling assumes one Servo 1.2.2 object on the 16 MHz ATmega328P.
+
+## Source layout
+
+| File | Responsibility |
+|---|---|
+| [src/main.cpp](src/main.cpp) | Switch handling, arm state machine, interaction tricks |
+| [include/config.h](include/config.h) | Pins, calibration, timings, thresholds |
+| [include/personality.h](include/personality.h) | Parameters, recovery, mood selection |
+| [include/choreography.h](include/choreography.h) | Gesture sequences stored in flash |
+| [src/face.cpp](src/face.cpp) | Face rendering, transitions, celebrations, dreams |
+| [src/sound.cpp](src/sound.cpp) | Nonblocking piezo playback |
+| [tests/logic_checks.cpp](tests/logic_checks.cpp) | Compile-time logic checks |
+| [tests/host/mechanism_test.cpp](tests/host/mechanism_test.cpp) | Controller simulations with fake Arduino I/O |
 
 ## Verification
 
-Firmware builds for nanoatmega328new. Static RAM and flash figures are reported by PlatformIO; the NeoPixel library also allocates a 192-byte pixel buffer on the heap. No automatic hardware upload or physical clearance verification is performed.
+Build the firmware with PlatformIO. Compile the logic checks with the AVR toolchain available on PATH:
 
-Compile-only personality, recovery, sound, matrix and animation checks:
-
-~~~sh
+```sh
 avr-g++ -mmcu=atmega328p -std=c++14 -Iinclude -c tests/logic_checks.cpp -o .pio/logic_checks.o
-~~~
+```
 
-Sixty-three host simulations include the actual controller with fake Arduino I/O and exactly one servo. They exercise each mood's distinct gesture path, cancellation during pauses, held-ON limits, tired quick repeats from before/after the peek, normal rapid retries, fake-out timing variants, switch debounce, startup-held ON, silent sleep and millis rollover.
+The host simulator has 69 scenarios covering mood routines, gesture cancellation, switch debounce, held-ON limits, rapid re-flips, tired approaches, startup, timing rollover, anticipation, fake sleep, victory limits, and the dream schedule. With Zig installed and available on PATH, run from PowerShell:
 
-~~~powershell
-.pio/host-tools/ziglang/zig.exe c++ -target x86_64-windows-gnu -std=c++14 -Itests/host -Iinclude tests/host/mechanism_test.cpp -o .pio/mechanism_test.exe
-0..68 | ForEach-Object { & ./.pio/mechanism_test.exe $_; if ($LASTEXITCODE -ne 0) { throw 'Simulation failed' } }
-~~~
+```powershell
+zig c++ -target x86_64-windows-gnu -std=c++14 -Itests/host -Iinclude tests/host/mechanism_test.cpp -o .pio/mechanism_test.exe
+if ($LASTEXITCODE -ne 0) { throw 'Simulator build failed' }
+0..68 | ForEach-Object {
+    & ./.pio/mechanism_test.exe $_
+    if ($LASTEXITCODE -ne 0) { throw "Simulation failed: $_" }
+}
+```
 
-On hardware, confirm the happy bob, both curious inspection stops, suspicious retreat, playful hiding, tired slow approach (including re-flips), and furious cancellation after the first successful push. Monitor supply voltage at the servo under load and check for mechanical interference. Software simulations cannot measure shaft position, torque or current.
-
-## References
-
-- [Arduino servo power and basics](https://docs.arduino.cc/learn/electronics/servo-motors/)
-- [Adafruit NeoPixel wiring guidance](https://learn.adafruit.com/adafruit-neopixel-uberguide/best-practices)
-- [PlatformIO classic Nano](https://docs.platformio.org/en/stable/boards/atmelavr/nanoatmega328.html)
-- [PlatformIO new-bootloader Nano](https://docs.platformio.org/en/stable/boards/atmelavr/nanoatmega328new.html)
-
-## Interaction tricks and dreams
-
-These are temporary performances layered over the existing mood parameters:
-
-- **I saw that coming:** every third consecutive quick re-flip (ON within 1.2 seconds of OFF) earns a knowing wink, a fast move to 80�, a 550 ms stare, then a direct push to 60�. Tired keeps its usual creep instead. A slower re-flip resets the streak.
-- **Fake sleep:** every second playful encounter pretends to sleep at 180� for 1.3 seconds, opens one eye for 650 ms, then slams. Anticipation takes precedence if both qualify. Normal playful encounters retain their rotating fake-outs.
-- **Victory:** only the first three OFF edges detected while pushing after each power-up qualify. After retracting, the display celebrates for 1.4 seconds: wink/confetti, pulsing heart, then colorful border confetti. A new ON immediately interrupts it. An aborted approach or a failed push never counts. Celebrations are silent and keep the arm home.
-- **Dreaming:** after 12 seconds continuously asleep, a dim thought picture fades in and out for 3.2 seconds, repeating every 18 seconds. Heart, star, and switch pictures cycle above the sleeping face. Normal moving Zs return between dreams. Dreams are silent and cause no arm motion.
-
-All responses retain the 400 ms sound lead-in, switch debouncing, OFF cancellation, and calibrated 180� rest / 60� push. No new mood parameters or extra idle sounds are introduced.
+Simulations verify controller behavior, not physical travel, torque, current, or LED appearance. Check those on the assembled machine.
