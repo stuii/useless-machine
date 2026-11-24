@@ -1,10 +1,11 @@
 #include <Arduino.h>
 #include "../../src/main.cpp"
+#include "dream_art.h"
 uint32_t fakeNow=0;
 bool fakeOn=false;
 unsigned plays=0,pushes=0;
-bool seen[32]={};
-namespace face {void begin(){} void update(uint32_t,personality::Mood,bool){}}
+bool seen[40]={};
+namespace face {void expression(Expression,uint32_t,uint8_t){} void begin(){} void update(uint32_t,personality::Mood,bool){}}
 namespace sound {void begin(){} void play(personality::Mood,uint32_t){++plays;} void update(uint32_t){} void stop(){} bool toneActive(){return false;}}
 void check(bool ok,const char* why){if(!ok){std::fprintf(stderr,"FAIL t=%lu state=%d: %s\n",(unsigned long)fakeNow,int(state),why);std::exit(1);}}
 void tick(){
@@ -113,7 +114,7 @@ int main(int argc,char** argv){
     nextVariant[static_cast<uint8_t>(tired?Routine::Creep:Routine::FakeOut)]=1;
     trigger();until(State::ScriptPause);fakeOn=false;advance(31);trigger();
     if(tired){until(State::Approaching);const int before=angle;advance(18);check(std::abs(angle-before)==1,"quick tired repeat must still creep after scripted cancellation");}
-    else {check(state!=State::Holding,"quick poke must replace script without bypassing new variation");until(State::ScriptMove);}
+    else {check(state==State::FakeSleep,"second playful encounter should pretend sleep");until(State::FakePeek);}
     complete();
   }
   else if(n==60){
@@ -135,6 +136,34 @@ int main(int argc,char** argv){
     fakeOn=false;advance(31);select(0);trigger();until(State::ScriptPause);check(motionVariant==2,"rapid repeat must run next expressive routine");
     fakeOn=false;advance(31);select(0);trigger();until(State::GreetingPause);check(motionVariant==0,"third repeat must retain baseline greeting");
     cancel();check(pushes==0,"cancelled variations must not leave pending pushes");
+  }
+  else if(n==63){
+    for(unsigned i=0;i<4;++i){select(4);trigger();until(State::Holding);cancel();
+      check(victories==(i<3?i+1:3),"only first three successful pushes celebrate");
+      check(celebrating==(i<3),"celebration limit");advance(1500);
+    }
+  } else if(n==64){
+    select(3);trigger();complete();select(3);trigger();
+    check(state==State::FakeSleep,"second playful encounter fake sleep");
+    advance(1200);check(angle==180 && state==State::FakeSleep,"fake sleep should stay home");
+    until(State::FakePeek);until(State::Holding);cancel();
+  } else if(n==65){
+    for(unsigned i=0;i<4;++i){select(4);trigger();
+      if(i==3){until(State::AnticipatePause);check(angle==80,"anticipation must wait at 80");advance(549);check(state==State::AnticipatePause,"knowing pause");}
+      until(State::Holding);fakeOn=false;advance(31);
+    }
+    until(State::Idle);
+  } else if(n==66){
+    playfulEncounters=1;select(3);trigger();until(State::FakeSleep);cancel();
+    check(pushes==0 && victories==0,"cancelled fake sleep must not push or celebrate");
+  } else if(n==67){
+    quickStreak=2;switchGate.released=true;switchGate.offSince=fakeNow;
+    select(4);trigger();until(State::AnticipatePause);cancel();
+    check(pushes==0 && victories==0,"cancel anticipation safely");
+  } else if(n==68){
+    check(!dreamArt::dreaming(11999) && dreamArt::dreaming(12000) && !dreamArt::dreaming(15200)
+        && dreamArt::dreaming(30000),"dream schedule");
+    advance(65000);check(plays==0 && pushes==0,"dreaming must stay quiet and stowed");
   }
   check(state==State::Idle && angle==config::HOME_DEG,"must finish at rest");
   std::printf("PASS scenario %u\n",n);

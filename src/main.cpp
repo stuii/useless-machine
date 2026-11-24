@@ -13,12 +13,15 @@ using personality::Routine;
 enum class State { Startup, Idle, ResponsePause, Preparing, Prepared, Reacting, Approaching, Peeking,
   GreetingOut, GreetingPause, GreetingBack, GreetingBackPause,
   InspectCloser, InspectPause, SuspiciousBack, SuspiciousPause,
-  Extending, Holding, Recoil, RecoilPause, Retracting, Settling, MischiefWait, WaitOff, ScriptMove, ScriptPause };
+  Extending, Holding, Recoil, RecoilPause, Retracting, Settling, MischiefWait, WaitOff, ScriptMove, ScriptPause, Anticipate, AnticipatePause, FakeSleep, FakePeek };
 State state = State::Startup;
 uint32_t stateSince=0, rawSince=0, lastStep=0, lastRestTick=0, lastReport=0;
 bool rawOn=false, stableOn=false, startupComplete=false;
 bool feintPending=false;
 uint8_t jabs=0;
+uint8_t quickStreak=0, playfulEncounters=0, victories=0;
+bool anticipate=false, pretendSleep=false, victoryPending=false, celebrating=false;
+uint32_t victorySince=0;
 uint8_t nextVariant[choreography::ROUTINES]={1,1,1,1,1,1,1};
 uint8_t motionVariant=0, scriptIndex=0;
 choreography::Step scriptStep={};
@@ -79,7 +82,9 @@ void beginScriptStep(uint32_t now) {
 }
 void startResponse(uint32_t now) {
   feintPending=false; jabs=0;
-  // Every activation runs its selected variant, including rapid re-flips.
+  if(anticipate){enter(State::Anticipate,now,F("I saw that coming"));return;}
+  if(pretendSleep){enter(State::FakeSleep,now,F("Definitely asleep..."));return;}
+  // Ordinary activations rotate through the selected variants.
   if(cycleBehavior.routine==Routine::Creep){
     const bool beyondPeek=config::HOME_DEG>config::PUSH_DEG
         ? angle<=cycleBehavior.peekDeg : angle>=cycleBehavior.peekDeg;
@@ -97,13 +102,25 @@ void setup(){
   enter(State::Startup,millis(),F("D4 switch; D9 arm. Rest 180, push 60. Homing."));
 }
 void loop(){
-  const uint32_t now=millis();updateSwitch(now);
+  const uint32_t now=millis();
+  const bool wasOn=stableOn;
+  updateSwitch(now);
+  // Only an OFF edge while actually pushing qualifies as a win.
+  if(wasOn && !stableOn && state==State::Holding && victories<3)victoryPending=true;
   if(state!=State::Idle || stableOn || rawOn){
     if(startupComplete && state!=State::Idle)mind.disturbed();
     lastRestTick=now;
   } else while(elapsed(now,lastRestTick,1000)){mind.restSecond();lastRestTick+=1000;}
   if(switchGate.accept(stableOn,now,!startupComplete)){
+    quickStreak=switchGate.quick(now) ? (quickStreak%3+1) : 0;
     mind.activate();cycleBehavior=mind.behavior();
+    anticipate=quickStreak>=3 && quickStreak%3==0 && cycleBehavior.routine!=Routine::Creep;
+    pretendSleep=false;
+    if(cycleBehavior.routine==Routine::FakeOut){
+      playfulEncounters=(playfulEncounters+1)%2;
+      pretendSleep=playfulEncounters==0 && !anticipate;
+    }
+    victoryPending=false;celebrating=false;
     // Rotate per mood, not globally: returning to a mood gives its next distinct routine.
     const uint8_t routine=static_cast<uint8_t>(cycleBehavior.routine);
     motionVariant=nextVariant[routine];
@@ -125,6 +142,19 @@ void loop(){
       }
       break;
     case State::Idle:break;
+    case State::Anticipate:
+      if(moveTo(80,now,0))enter(State::AnticipatePause,now,F("Already waiting for you"));
+      break;
+    case State::AnticipatePause:
+      if(elapsed(now,stateSince,550))enter(State::Extending,now,F("Called it"));
+      break;
+    case State::FakeSleep:
+      if(moveTo(config::HOME_DEG,now,0) && elapsed(now,stateSince,1300))
+        enter(State::FakePeek,now,F("One eye open"));
+      break;
+    case State::FakePeek:
+      if(elapsed(now,stateSince,650))enter(State::Extending,now,F("Fooled you"));
+      break;
     case State::ResponsePause:
       if(elapsed(now,stateSince,config::RESPONSE_PAUSE_MS))startResponse(now);
       break;
@@ -210,7 +240,14 @@ void loop(){
     case State::Settling:
       if(elapsed(now,stateSince,config::HOME_SETTLE_MS)){
         if(feintPending && stableOn)enter(State::MischiefWait,now,F("Hiding..."));
-        else {feintPending=false;enter(stableOn?State::WaitOff:State::Idle,now,F("Stowed"));}
+        else {
+          feintPending=false;
+          if(!stableOn && victoryPending && victories<3){
+            ++victories;celebrating=true;victorySince=now;
+          }
+          victoryPending=false;
+          enter(stableOn?State::WaitOff:State::Idle,now,F("Stowed"));
+        }
       }
       break;
     case State::MischiefWait:
@@ -225,5 +262,12 @@ void loop(){
   if(mind.mood()!=reportedMood || elapsed(now,lastReport,5000)){reportMood();lastReport=now;}
   if(!stableOn || state==State::Idle || state==State::WaitOff)sound::stop();
   sound::update(now);
+  if(celebrating && elapsed(now,victorySince,1400))celebrating=false;
+  face::Expression expression=face::Expression::Normal;
+  if(state==State::Anticipate || state==State::AnticipatePause)expression=face::Expression::Knowing;
+  else if(state==State::FakeSleep)expression=face::Expression::FakeSleep;
+  else if(state==State::FakePeek)expression=face::Expression::Peek;
+  else if(celebrating && state==State::Idle)expression=face::Expression::Victory;
+  face::expression(expression,expression==face::Expression::Victory?victorySince:stateSince,victories);
   face::update(now,mind.mood(),state==State::Peeking || state==State::InspectPause || state==State::SuspiciousPause || state==State::ScriptPause);
 }

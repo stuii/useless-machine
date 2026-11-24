@@ -10,6 +10,7 @@
 #include "face_transition.h"
 #include "sleep_animation.h"
 #include "startup_animation.h"
+#include "dream_art.h"
 #if !defined(__AVR_ATmega328P__) || F_CPU != 16000000UL
 #error "Face/servo scheduling requires the classic 16 MHz ATmega328P Nano."
 #endif
@@ -20,6 +21,11 @@ uint32_t blinkSince = 0;
 bool blinking = false;
 uint8_t blinkSequence = 0;
 faceAnimation::Transition transition;
+face::Expression expressionValue=face::Expression::Normal;
+uint32_t expressionSince=0, asleepSince=0;
+uint8_t expressionVariant=0;
+bool wasAsleep=false;
+uint32_t effectKey=0xffffffffUL;
 bool booting = true;
 uint32_t bootSince = 0;
 uint8_t bootFrame = 255;
@@ -113,6 +119,43 @@ void drawZs(uint8_t phase) {
         put(x, y, SLEEP_Z_COLOR);
 }
 
+// Effects are drawn as complete frames; they never drive the mechanism or sound.
+void drawEffect(face::Expression effect,uint32_t age,uint8_t variant) {
+  if(effect==face::Expression::FakeSleep || effect==face::Expression::Peek){
+    draw(7,false,false,55);
+    if(effect==face::Expression::FakeSleep)drawZs(sleepZPhase(age));
+    else {put(5,4,0x204858);put(6,4,0x204858);put(5,5,0x608898);}
+  } else {
+    draw(0,false,false,100);
+    // A deliberate wink accompanies the knowing look and the first victory.
+    if(effect==face::Expression::Knowing || variant==1){
+      for(uint8_t y=1;y<5;++y)for(uint8_t x=4;x<8;++x)put(x,y,0);
+      put(5,3,0x408050);put(6,3,0x408050);
+      if(effect==face::Expression::Knowing){put(5,1,0x408050);put(6,0,0x408050);}
+    }
+    if(effect==face::Expression::Victory){
+      const uint8_t frame=age/100;
+      if(variant==2){ // A pulsing heart above the smile.
+        for(uint8_t y=0;y<5;++y)for(uint8_t x=0;x<8;++x)
+          put(x,y,dreamArt::lit(0,x,y)?(frame%4<2?0x782018:0x38100C):0);
+      } else { // Confetti travels around the border, clear of the face.
+        for(uint8_t i=0;i<8;++i){
+          const uint8_t y=(i+frame)%8;
+          put(i,0,(i+frame)%2?0x403008:0x083040);
+          if(variant==3){put(0,y,0x402030);put(7,7-y,0x203840);}
+        }
+      }
+    }
+  }
+}
+void drawDream(uint32_t age,uint8_t picture,uint32_t now){
+  draw(7,false,false,sleepBreath(now));
+  const uint16_t fade=age<600?age:age>2600?3200-age:600;
+  const uint8_t glow=uint32_t(fade)*24/600;
+  for(uint8_t y=0;y<5;++y)for(uint8_t x=0;x<8;++x)
+    if(dreamArt::lit(picture,x,y))put(x,y,pixels.Color(glow,glow/2,glow));
+}
+
 bool inServoGap() {
   // One Servo 1.2.2 channel: at most 2.4 ms of pulses per 20 ms frame.
   // Start the ~1.92 ms LED transfer at 4..14 ms, with the signal LOW.
@@ -122,6 +165,13 @@ bool inServoGap() {
   return ticks >= 8000 && ticks <= 28000
       && digitalRead(config::ARM_SERVO_PIN) == LOW;
 }
+}
+
+void face::expression(Expression value,uint32_t since,uint8_t variant){
+  if(value!=expressionValue || (value!=Expression::Normal && since!=expressionSince)){
+    effectKey=0xffffffffUL;displayedKey=65535;
+  }
+  expressionValue=value;expressionSince=since;expressionVariant=variant;
 }
 
 void face::begin() {
@@ -154,6 +204,20 @@ void face::update(uint32_t now, personality::Mood emotion, bool reacting) {
     displayedKey = 65535;
     blinkSince = now;
   }
+  const bool asleep=emotion==personality::Mood::Asleep && expressionValue==Expression::Normal;
+  if(asleep && !wasAsleep)asleepSince=now;
+  wasAsleep=asleep;
+  const uint32_t sleepAge=now-asleepSince;
+  const bool dream=asleep && dreamArt::dreaming(sleepAge);
+  if(expressionValue!=Expression::Normal || dream){
+    const uint32_t key=now/100;
+    if(key==effectKey || sound::toneActive() || !inServoGap())return;
+    if(dream)drawDream((sleepAge-12000)%18000,((sleepAge-12000)/18000)%3,now);
+    else drawEffect(expressionValue,now-expressionSince,expressionVariant);
+    pixels.show();effectKey=key;displayedKey=65535;
+    return;
+  }
+  effectKey=0xffffffffUL;
   transition.request(mood, now);
   if (transition.active) {
     if (!transition.due(now) || sound::toneActive()) return;

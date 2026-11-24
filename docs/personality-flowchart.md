@@ -154,3 +154,38 @@ ScriptMove advances nonblocking toward one target. ScriptPause waits its bounded
 ## Mood progression tuning
 
 Playful requires three pokes in a streak and excitement at least 60. A poke after eight quiet seconds starts a new streak at one; patience, curiosity, energy and anger still affect which mood wins. Spaced pokes cost 4 energy, repeated pokes cost 8. From startup with no recovery, playful first appears on poke three, annoyed on six, furious on seven/eight, and tired on nine. Tired takes priority over furious; fury remains possible when annoyance is high and energy sufficient. Maximum annoyance falls below the annoyed threshold after four idle/OFF seconds and clears after six. All cooldown starts after two quiet seconds. Movement or held ON prevents recovery.
+
+## Interaction tricks and dreams
+
+These are temporary performances layered over the existing mood parameters:
+
+- **I saw that coming:** every third consecutive quick re-flip (ON within 1.2 seconds of OFF) earns a knowing wink, a fast move to 80°, a 550 ms stare, then a direct push to 60°. Tired keeps its usual creep instead. A slower re-flip resets the streak.
+- **Fake sleep:** every second playful encounter pretends to sleep at 180° for 1.3 seconds, opens one eye for 650 ms, then slams. Anticipation takes precedence if both qualify. Normal playful encounters retain their rotating fake-outs.
+- **Victory:** only the first three OFF edges detected while pushing after each power-up qualify. After retracting, the display celebrates for 1.4 seconds: wink/confetti, pulsing heart, then colorful border confetti. A new ON immediately interrupts it. An aborted approach or a failed push never counts. Celebrations are silent and keep the arm home.
+- **Dreaming:** after 12 seconds continuously asleep, a dim thought picture fades in and out for 3.2 seconds, repeating every 18 seconds. Heart, star, and switch pictures cycle above the sleeping face. Normal moving Zs return between dreams. Dreams are silent and cause no arm motion.
+
+All responses retain the 400 ms sound lead-in, switch debouncing, OFF cancellation, and calibrated 180° rest / 60° push. No new mood parameters or extra idle sounds are introduced.
+
+```mermaid
+flowchart TD
+    ON[Accepted ON] --> SOUND[Play interaction sound; wait 400 ms]
+    SOUND --> Q{Third quick re-flip and not tired?}
+    Q -->|Yes| KNOW[Knowing wink; dart to 80; wait 550 ms]
+    Q -->|No| F{Every second playful encounter?}
+    F -->|Yes| FAKE[Home; fake sleep 1300 ms; peek 650 ms]
+    F -->|No| NORMAL[Rotating mood choreography]
+    KNOW --> PUSH[Push 60 degrees]
+    FAKE --> PUSH
+    NORMAL --> PUSH
+    PUSH --> OFF{OFF while holding push?}
+    OFF -->|Yes| HOME[Retract home]
+    HOME --> LIMIT{Fewer than three victories since boot?}
+    LIMIT -->|Yes| WIN[Next silent display celebration; 1400 ms]
+    LIMIT -->|No| IDLE[Idle]
+    WIN --> IDLE
+    IDLE --> SLEEP[Asleep for 12 seconds]
+    SLEEP --> DREAM[Silent dim dream; 3200 ms; repeat every 18 s]
+    DREAM --> IDLE
+```
+
+Any fresh ON replaces the current performance; any OFF cancels a pending push. Dreams and victory visuals do not delay personality recovery.

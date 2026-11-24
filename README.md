@@ -117,7 +117,7 @@ Sixty-three host simulations include the actual controller with fake Arduino I/O
 
 ~~~powershell
 .pio/host-tools/ziglang/zig.exe c++ -target x86_64-windows-gnu -std=c++14 -Itests/host -Iinclude tests/host/mechanism_test.cpp -o .pio/mechanism_test.exe
-0..62 | ForEach-Object { & ./.pio/mechanism_test.exe $_; if ($LASTEXITCODE -ne 0) { throw 'Simulation failed' } }
+0..68 | ForEach-Object { & ./.pio/mechanism_test.exe $_; if ($LASTEXITCODE -ne 0) { throw 'Simulation failed' } }
 ~~~
 
 On hardware, confirm the happy bob, both curious inspection stops, suspicious retreat, playful hiding, tired slow approach (including re-flips), and furious cancellation after the first successful push. Monitor supply voltage at the servo under load and check for mechanical interference. Software simulations cannot measure shaft position, torque or current.
@@ -128,3 +128,14 @@ On hardware, confirm the happy bob, both curious inspection stops, suspicious re
 - [Adafruit NeoPixel wiring guidance](https://learn.adafruit.com/adafruit-neopixel-uberguide/best-practices)
 - [PlatformIO classic Nano](https://docs.platformio.org/en/stable/boards/atmelavr/nanoatmega328.html)
 - [PlatformIO new-bootloader Nano](https://docs.platformio.org/en/stable/boards/atmelavr/nanoatmega328new.html)
+
+## Interaction tricks and dreams
+
+These are temporary performances layered over the existing mood parameters:
+
+- **I saw that coming:** every third consecutive quick re-flip (ON within 1.2 seconds of OFF) earns a knowing wink, a fast move to 80°, a 550 ms stare, then a direct push to 60°. Tired keeps its usual creep instead. A slower re-flip resets the streak.
+- **Fake sleep:** every second playful encounter pretends to sleep at 180° for 1.3 seconds, opens one eye for 650 ms, then slams. Anticipation takes precedence if both qualify. Normal playful encounters retain their rotating fake-outs.
+- **Victory:** only the first three OFF edges detected while pushing after each power-up qualify. After retracting, the display celebrates for 1.4 seconds: wink/confetti, pulsing heart, then colorful border confetti. A new ON immediately interrupts it. An aborted approach or a failed push never counts. Celebrations are silent and keep the arm home.
+- **Dreaming:** after 12 seconds continuously asleep, a dim thought picture fades in and out for 3.2 seconds, repeating every 18 seconds. Heart, star, and switch pictures cycle above the sleeping face. Normal moving Zs return between dreams. Dreams are silent and cause no arm motion.
+
+All responses retain the 400 ms sound lead-in, switch debouncing, OFF cancellation, and calibrated 180° rest / 60° push. No new mood parameters or extra idle sounds are introduced.
