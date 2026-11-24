@@ -189,3 +189,42 @@ flowchart TD
 ```
 
 Any fresh ON replaces the current performance; any OFF cancels a pending push. Dreams and victory visuals do not delay personality recovery.
+
+## Rare surprises
+
+After anticipation and fake-sleep checks, a non-tired activation can select a rare surprise instead of the normal choreography. The first four activations are excluded. Eligible activations have a 1-in-12 chance; after a selection, eight intervening activations and 45 seconds are required before another draw can succeed. Consecutive selections differ.
+
+```mermaid
+flowchart TD
+    ELIGIBLE{Not tired, anticipating, or faking sleep?} -->|No| NORMAL[Existing routine]
+    ELIGIBLE -->|Yes| DRAW{Warmup and cooldown satisfied; 1-in-12 draw succeeds?}
+    DRAW -->|No| NORMAL
+    DRAW -->|Yes| LEAD[400 ms sound lead-in]
+    LEAD --> ERROR[Rainbow system error; 1800 ms]
+    LEAD --> COUNT[3-2-1 countdown; 2100 ms]
+    LEAD --> DEAD[Deadpan stare; 1100 ms]
+    ERROR --> PUSH[One direct push, then retract]
+    COUNT --> PUSH
+    DEAD --> PUSH
+```
+
+All three keep the arm home during their visual performance, retain normal mood parameters, and remain cancellable on OFF. They do not add idle sounds or reset the controller.
+
+## Surrender after unsuccessful attempts
+
+```mermaid
+flowchart TD
+    HOLD[Push held for up to 500 ms] --> OFF{Switch OFF?}
+    OFF -->|Yes| SUCCESS[Cancel remaining motion; return home; eligible victory]
+    OFF -->|No| RETRY{Ordinary furious routine with only one jab?}
+    RETRY -->|Yes| JAB[Recoil; one final jab]
+    JAB --> HOLD
+    RETRY -->|No| RETURN[You win: retract fully and settle]
+    RETURN --> STILL{Switch still ON?}
+    STILL -->|Yes| SURRENDER[Embarrassed face and waving white flag; silent; arm home]
+    STILL -->|No| IDLE[Clear surrender; idle]
+    SURRENDER -->|Held ON| SURRENDER
+    SURRENDER -->|OFF| IDLE
+```
+
+Surrender is a temporary expression, not a parameter reset. It performs no additional pushes or sounds. A fresh OFF-to-ON starts a normal interaction. Rare surprises have a single-push budget even when the underlying mood is furious.

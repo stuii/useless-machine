@@ -72,10 +72,24 @@ Sleepy and asleep are resting expressions. An activation wakes the personality a
 
 ## Interaction tricks
 
+- **You win:** if the switch stays ON after the allowed attempts (one push, or up to two for furious), the arm retracts fully and the face shows downcast eyes, blushing cheeks, a crooked mouth, and a tiny waving white flag. It stays silently surrendered at home until OFF, with no further pushes. Turning OFF during retraction cancels the surrender; a successful push follows the victory path instead. The serial monitor prints `You win; returning home` when the attempt budget is exhausted.
+
 - **I saw that coming:** every third consecutive quick re-flip earns a knowing wink, a dart to 80 degrees, a 550 ms stare, then a push. A quick re-flip means ON within 1.2 seconds of OFF; a slower one resets the streak. Tired keeps its creep routine.
 - **Fake sleep:** every second playful encounter stays home with closed eyes for 1.3 seconds, opens one eye for 650 ms, then slams. Anticipation takes precedence if both qualify.
 - **Victory celebrations:** an OFF edge while holding a push qualifies for a celebration after retraction. The first three celebrations per power-up are wink/confetti, a pulsing heart, and colorful border confetti. Each lasts 1.4 seconds, stays silent, and keeps the arm home. Another ON interrupts it.
 - **Dreaming:** after 12 seconds continuously asleep, a dim heart, star, or switch fades above the sleeping face for 3.2 seconds. Dreams repeat every 18 seconds, cycling through the pictures. Moving Zs return between dreams. The arm stays still and the piezo stays silent.
+
+### Rare surprises
+
+After the first four interactions, eligible pokes have a 1-in-12 chance of replacing the usual routine with one of these performances:
+
+- **Rainbow system error:** colorful broken scanlines for 1.3 seconds, a brief composed face, then a single push at 1.8 seconds. This is an animation, not a reset.
+- **Dramatic countdown:** the grid counts 3, 2, 1 in changing colors, spending 700 ms on each digit before the slam.
+- **Deadpan:** flat eyes and a straight mouth, an unblinking 1.1-second stare at home, then one plain push.
+
+The arm stays home during the performance. Each retains the 400 ms sound lead-in and uses the normal interaction sound. OFF cancels the pending push; another ON replaces the performance. Tired, anticipation, and fake sleep take priority.
+
+After a surprise, at least eight intervening interactions and 45 seconds must pass before another can be selected. Consecutive surprises never use the same performance. Selection mixes interaction timing into a private pseudorandom generator; it does not run on a fixed flip count. Serial output identifies the selection as `Rare surprise=1/2/3` in the order above.
 
 ## Personality and recovery
 
@@ -138,12 +152,12 @@ Build the firmware with PlatformIO. Compile the logic checks with the AVR toolch
 avr-g++ -mmcu=atmega328p -std=c++14 -Iinclude -c tests/logic_checks.cpp -o .pio/logic_checks.o
 ```
 
-The host simulator has 69 scenarios covering mood routines, gesture cancellation, switch debounce, held-ON limits, rapid re-flips, tired approaches, startup, timing rollover, anticipation, fake sleep, victory limits, and the dream schedule. With Zig installed and available on PATH, run from PowerShell:
+The host simulator has 86 scenarios covering mood routines, gesture cancellation, switch debounce, held-ON limits, rapid re-flips, tired approaches, startup, timing rollover, anticipation, fake sleep, victory limits, and the dream schedule. With Zig installed and available on PATH, run from PowerShell:
 
 ```powershell
 zig c++ -target x86_64-windows-gnu -std=c++14 -Itests/host -Iinclude tests/host/mechanism_test.cpp -o .pio/mechanism_test.exe
 if ($LASTEXITCODE -ne 0) { throw 'Simulator build failed' }
-0..68 | ForEach-Object {
+0..85 | ForEach-Object {
     & ./.pio/mechanism_test.exe $_
     if ($LASTEXITCODE -ne 0) { throw "Simulation failed: $_" }
 }

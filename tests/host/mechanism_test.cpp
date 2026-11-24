@@ -5,7 +5,7 @@ uint32_t fakeNow=0;
 bool fakeOn=false;
 unsigned plays=0,pushes=0;
 bool seen[40]={};
-namespace face {void expression(Expression,uint32_t,uint8_t){} void begin(){} void update(uint32_t,personality::Mood,bool){}}
+namespace face {Expression shown=Expression::Normal; void expression(Expression e,uint32_t,uint8_t){shown=e;} void begin(){} void update(uint32_t,personality::Mood,bool){}}
 namespace sound {void begin(){} void play(personality::Mood,uint32_t){++plays;} void update(uint32_t){} void stop(){} bool toneActive(){return false;}}
 void check(bool ok,const char* why){if(!ok){std::fprintf(stderr,"FAIL t=%lu state=%d: %s\n",(unsigned long)fakeNow,int(state),why);std::exit(1);}}
 void tick(){
@@ -164,6 +164,64 @@ int main(int argc,char** argv){
     check(!dreamArt::dreaming(11999) && dreamArt::dreaming(12000) && !dreamArt::dreaming(15200)
         && dreamArt::dreaming(30000),"dream schedule");
     advance(65000);check(plays==0 && pushes==0,"dreaming must stay quiet and stowed");
+  }
+  else if(n>=69 && n<=74){
+    select(5);trigger();surprise=surprises::Kind(1+(n-69)%3);startResponse(fakeNow);
+    check(state==State::RareSurprise,"surprise dispatch");
+    advance(surprises::duration(surprise)-(n<=71?1:100));
+    check(state==State::RareSurprise && angle==180,"surprise must wait at home");
+    if(n<=71){complete();check(pushes==1,"rare surprises must push only once, even when furious");}
+    else {cancel();advance(2500);check(pushes==0,"OFF cancels surprise push");}
+    check(plays==1,"surprise must not generate idle or repeated sounds");
+  } else if(n==75){
+    surprises::Selector selector;unsigned hits=0,lastPoke=0;uint32_t lastTime=0;
+    surprises::Kind last=surprises::Kind::None;bool kinds[4]={};
+    for(unsigned i=1;i<=2000;++i){
+      const uint32_t time=i*7001UL;
+      const auto result=selector.choose(time,true);
+      if(result==surprises::Kind::None)continue;
+      check(i>=5,"surprises need warmup");
+      if(hits)check(i-lastPoke>=9 && time-lastTime>=45000 && result!=last,"surprise cooldown and no immediate repeats");
+      ++hits;kinds[unsigned(result)]=true;last=result;lastPoke=i;lastTime=time;
+    }
+    check(hits>30 && hits<200 && kinds[1] && kinds[2] && kinds[3],"rare varied selection");
+    for(unsigned i=0;i<1000;++i)check(selector.choose(i*60001UL,false)==surprises::Kind::None,"ineligible moods/tricks excluded");
+  } else if(n==76){
+    select(0);trigger();surprise=surprises::Kind::Countdown;startResponse(fakeNow);
+    advance(500);fakeOn=false;advance(31);select(6);trigger();
+    check(surprise==surprises::Kind::None,"fresh tired activation replaces surprise");
+    until(State::Approaching);until(State::Peeking);check(angle==100,"tired still creeps to 100");complete();
+  }
+  else if(n>=77 && n<=79){
+    const auto wanted=surprises::Kind(n-76);
+    surpriseSelector.pokes=4;
+    for(uint32_t seed=1;;++seed){
+      surpriseSelector.randomState=seed;
+      auto probe=surpriseSelector;
+      if(probe.choose(fakeNow+31,true)==wanted)break;
+      check(seed<10000,"find deterministic selection fixture");
+    }
+    select(0);trigger();check(state==State::RareSurprise && surprise==wanted,"real activation must dispatch selected surprise");
+    complete();check(pushes==1,"selected surprise pushes exactly once");
+  }
+  else if(n==80 || n==81){
+    select(n==80?4:5);trigger();until(State::WaitOff);
+    check(surrendered && face::shown==face::Expression::Surrender,"failed bounded attempts must show surrender at home");
+    check(pushes==(n==80?1u:2u) && victories==0,"attempt budget and no false victory");
+    const auto hits=pushes, audio=plays;advance(60000);
+    check(angle==180 && state==State::WaitOff && pushes==hits && plays==audio,"surrender must not retry or replay sound");
+    cancel();check(!surrendered && face::shown!=face::Expression::Surrender,"OFF clears surrender");
+  } else if(n==82){
+    select(4);trigger();until(State::Holding);until(State::Retracting);cancel();
+    check(!surrendered && face::shown!=face::Expression::Surrender,"OFF during return cancels pending surrender");
+  } else if(n==83){
+    select(5);trigger();until(State::Holding);cancel();
+    check(!surrendered && pushes==1 && victories==1,"successful push celebrates instead of surrendering");
+  } else if(n==84){
+    select(4);trigger();until(State::WaitOff);fakeOn=false;advance(31);select(0);trigger();
+    check(!surrendered && face::shown!=face::Expression::Surrender,"fresh ON must clear surrender");cancel();
+  } else if(n==85){
+    advance(60000);check(!surrendered && face::shown!=face::Expression::Surrender,"idle boot must not surrender");
   }
   check(state==State::Idle && angle==config::HOME_DEG,"must finish at rest");
   std::printf("PASS scenario %u\n",n);

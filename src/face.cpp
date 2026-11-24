@@ -11,6 +11,7 @@
 #include "sleep_animation.h"
 #include "startup_animation.h"
 #include "dream_art.h"
+#include "surprises.h"
 #if !defined(__AVR_ATmega328P__) || F_CPU != 16000000UL
 #error "Face/servo scheduling requires the classic 16 MHz ATmega328P Nano."
 #endif
@@ -121,6 +122,44 @@ void drawZs(uint8_t phase) {
 
 // Effects are drawn as complete frames; they never drive the mechanism or sound.
 void drawEffect(face::Expression effect,uint32_t age,uint8_t variant) {
+  if(effect==face::Expression::Surrender){
+    // Downcast eyes, warm blush, a crooked mouth and a tiny waving white flag.
+    for(uint8_t y=0;y<8;++y)for(uint8_t x=0;x<8;++x){
+      uint32_t color=0;
+      if(y==4 && (x==1 || x==2 || x==5 || x==6))color=0x304850;
+      if(y==5 && (x==0 || x==7))color=0x501820;
+      if((y==6 && x>=2 && x<=4) || (y==7 && x==5))color=0x304850;
+      const uint8_t flagX=4+(age/600)%2;
+      if((y<2 && x>=flagX && x<flagX+3) || (y==2 && x==flagX))color=0x505048;
+      put(x,y,color);
+    }
+    return;
+  }
+  if(effect==face::Expression::SystemError){
+    // Colorful broken scanlines, then a deadpan recovery. Respect global brightness.
+    for(uint8_t y=0;y<8;++y)for(uint8_t x=0;x<8;++x){
+      const uint8_t phase=(x+2*y+age/150)%6;
+      const uint32_t colors[]={0x702010,0x504010,0x106030,0x105060,0x302070,0x602040};
+      put(x,y,(y+age/150)%3==0?colors[phase]:0);
+    }
+    if(age>=1300){draw(0,false,false,65);for(uint8_t x=2;x<6;++x)put(x,6,0x304050);}
+    return;
+  }
+  if(effect==face::Expression::Countdown){
+    const uint8_t digit=age<700?3:age<1400?2:1;
+    for(uint8_t y=0;y<8;++y)for(uint8_t x=0;x<8;++x){
+      const bool lit=y>=1 && y<6 && x>=2 && x<5 &&
+          (surprises::digitRow(digit,y-1)&(4>>(x-2)));
+      put(x,y,lit?(digit==3?0x105040:digit==2?0x605010:0x702010):0);
+    }
+    return;
+  }
+  if(effect==face::Expression::Deadpan){
+    for(uint8_t y=0;y<8;++y)for(uint8_t x=0;x<8;++x)
+      put(x,y,((y==3 && (x==1 || x==2 || x==5 || x==6)) ||
+          (y==6 && x>=2 && x<=5))?0x304050:0);
+    return;
+  }
   if(effect==face::Expression::FakeSleep || effect==face::Expression::Peek){
     draw(7,false,false,55);
     if(effect==face::Expression::FakeSleep)drawZs(sleepZPhase(age));

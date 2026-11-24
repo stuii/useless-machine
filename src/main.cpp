@@ -6,6 +6,7 @@
 #include "personality.h"
 #include "interaction.h"
 #include "choreography.h"
+#include "surprises.h"
 
 namespace {
 Servo arm;
@@ -13,12 +14,16 @@ using personality::Routine;
 enum class State { Startup, Idle, ResponsePause, Preparing, Prepared, Reacting, Approaching, Peeking,
   GreetingOut, GreetingPause, GreetingBack, GreetingBackPause,
   InspectCloser, InspectPause, SuspiciousBack, SuspiciousPause,
-  Extending, Holding, Recoil, RecoilPause, Retracting, Settling, MischiefWait, WaitOff, ScriptMove, ScriptPause, Anticipate, AnticipatePause, FakeSleep, FakePeek };
+  Extending, Holding, Recoil, RecoilPause, Retracting, Settling, MischiefWait, WaitOff, ScriptMove, ScriptPause, Anticipate, AnticipatePause, FakeSleep, FakePeek, RareSurprise };
 State state = State::Startup;
 uint32_t stateSince=0, rawSince=0, lastStep=0, lastRestTick=0, lastReport=0;
 bool rawOn=false, stableOn=false, startupComplete=false;
 bool feintPending=false;
+bool surrendered=false;
 uint8_t jabs=0;
+surprises::Selector surpriseSelector;
+surprises::Kind surprise=surprises::Kind::None;
+uint32_t surpriseSince=0;
 uint8_t quickStreak=0, playfulEncounters=0, victories=0;
 bool anticipate=false, pretendSleep=false, victoryPending=false, celebrating=false;
 uint32_t victorySince=0;
@@ -84,6 +89,11 @@ void startResponse(uint32_t now) {
   feintPending=false; jabs=0;
   if(anticipate){enter(State::Anticipate,now,F("I saw that coming"));return;}
   if(pretendSleep){enter(State::FakeSleep,now,F("Definitely asleep..."));return;}
+  if(surprise!=surprises::Kind::None){
+    surpriseSince=now;
+    Serial.print(F("Rare surprise="));Serial.println(uint8_t(surprise));
+    enter(State::RareSurprise,now,F("Something unexpected"));return;
+  }
   // Ordinary activations rotate through the selected variants.
   if(cycleBehavior.routine==Routine::Creep){
     const bool beyondPeek=config::HOME_DEG>config::PUSH_DEG
@@ -105,6 +115,7 @@ void loop(){
   const uint32_t now=millis();
   const bool wasOn=stableOn;
   updateSwitch(now);
+  if(!stableOn)surrendered=false;
   // Only an OFF edge while actually pushing qualifies as a win.
   if(wasOn && !stableOn && state==State::Holding && victories<3)victoryPending=true;
   if(state!=State::Idle || stableOn || rawOn){
@@ -120,7 +131,8 @@ void loop(){
       playfulEncounters=(playfulEncounters+1)%2;
       pretendSleep=playfulEncounters==0 && !anticipate;
     }
-    victoryPending=false;celebrating=false;
+    surprise=surpriseSelector.choose(now,!anticipate && !pretendSleep && cycleBehavior.routine!=Routine::Creep);
+    victoryPending=false;celebrating=false;surrendered=false;
     // Rotate per mood, not globally: returning to a mood gives its next distinct routine.
     const uint8_t routine=static_cast<uint8_t>(cycleBehavior.routine);
     motionVariant=nextVariant[routine];
@@ -142,6 +154,12 @@ void loop(){
       }
       break;
     case State::Idle:break;
+    case State::RareSurprise:
+      // Stay home for the visual joke, then make one decisive, ordinary push.
+      moveTo(config::HOME_DEG,now,0);
+      if(elapsed(now,stateSince,surprises::duration(surprise)))
+        enter(State::Extending,now,F("Surprise push"));
+      break;
     case State::Anticipate:
       if(moveTo(80,now,0))enter(State::AnticipatePause,now,F("Already waiting for you"));
       break;
@@ -224,8 +242,8 @@ void loop(){
       break;
     case State::Holding:
       if(elapsed(now,stateSince,config::PUSH_HOLD_MS)){
-        if(cycleBehavior.routine==Routine::DoubleJab && jabs<2)enter(State::Recoil,now,F("One more jab"));
-        else {feintPending=false;enter(State::Retracting,now,F("Returning"));}
+        if(surprise==surprises::Kind::None && cycleBehavior.routine==Routine::DoubleJab && jabs<2)enter(State::Recoil,now,F("One more jab"));
+        else {feintPending=false;surrendered=true;enter(State::Retracting,now,F("You win; returning home"));}
       }
       break;
     case State::Recoil:
@@ -264,10 +282,15 @@ void loop(){
   sound::update(now);
   if(celebrating && elapsed(now,victorySince,1400))celebrating=false;
   face::Expression expression=face::Expression::Normal;
-  if(state==State::Anticipate || state==State::AnticipatePause)expression=face::Expression::Knowing;
+  const bool rareFace=surprise!=surprises::Kind::None &&
+      (state==State::RareSurprise || state==State::Extending || state==State::Holding);
+  if(surrendered && state==State::WaitOff)expression=face::Expression::Surrender;
+  else if(rareFace)expression=surprise==surprises::Kind::SystemError?face::Expression::SystemError:
+      surprise==surprises::Kind::Countdown?face::Expression::Countdown:face::Expression::Deadpan;
+  else if(state==State::Anticipate || state==State::AnticipatePause)expression=face::Expression::Knowing;
   else if(state==State::FakeSleep)expression=face::Expression::FakeSleep;
   else if(state==State::FakePeek)expression=face::Expression::Peek;
   else if(celebrating && state==State::Idle)expression=face::Expression::Victory;
-  face::expression(expression,expression==face::Expression::Victory?victorySince:stateSince,victories);
+  face::expression(expression,rareFace?surpriseSince:expression==face::Expression::Victory?victorySince:stateSince,victories);
   face::update(now,mind.mood(),state==State::Peeking || state==State::InspectPause || state==State::SuspiciousPause || state==State::ScriptPause);
 }
