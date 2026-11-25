@@ -122,6 +122,18 @@ void drawZs(uint8_t phase) {
 
 // Effects are drawn as complete frames; they never drive the mechanism or sound.
 void drawEffect(face::Expression effect,uint32_t age,uint8_t variant) {
+  if(effect==face::Expression::Sigh){
+    const uint32_t exhaleStart=config::ANNOYED_IGNORE_MS-1000;
+    const bool exhaling=age>=exhaleStart && age<exhaleStart+800;
+    for(uint8_t y=0;y<8;++y)for(uint8_t x=0;x<8;++x){
+      const bool eyes=(y==3 && (x==1 || x==2 || x==5 || x==6)) ||
+          (!exhaling && y==2 && (x==1 || x==5));
+      const bool mouth=exhaling?((y==5 || y==7) && (x==3 || x==4)) ||
+          (y==6 && (x==2 || x==5)):(y==6 && x>=2 && x<=5);
+      put(x,y,eyes?0x704010:mouth?0x402008:0);
+    }
+    return;
+  }
   if(effect==face::Expression::Surrender){
     // Downcast eyes, warm blush, a crooked mouth and a tiny waving white flag.
     for(uint8_t y=0;y<8;++y)for(uint8_t x=0;x<8;++x){

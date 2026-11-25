@@ -6,7 +6,7 @@ bool fakeOn=false;
 unsigned plays=0,pushes=0;
 bool seen[40]={};
 namespace face {Expression shown=Expression::Normal; void expression(Expression e,uint32_t,uint8_t){shown=e;} void begin(){} void update(uint32_t,personality::Mood,bool){}}
-namespace sound {void begin(){} void play(personality::Mood,uint32_t){++plays;} void update(uint32_t){} void stop(){} bool toneActive(){return false;}}
+namespace sound {unsigned cues[8]={}; bool active=false; void playCue(Cue c,uint32_t){++cues[unsigned(c)];active=true;} void begin(){} void play(personality::Mood,uint32_t){++plays;active=true;} void update(uint32_t){} void stop(){active=false;} bool toneActive(){return false;}}
 void check(bool ok,const char* why){if(!ok){std::fprintf(stderr,"FAIL t=%lu state=%d: %s\n",(unsigned long)fakeNow,int(state),why);std::exit(1);}}
 void tick(){
   const State old=state;
@@ -42,7 +42,9 @@ void complete(){until(State::WaitOff);const auto count=mind.activations;const au
 void boot(bool on=false){fakeOn=on;setup();while(!startupComplete)tick();if(!on)check(state==State::Idle && mind.mood()==personality::Mood::Asleep,"boot must rest asleep");check(plays==0,"startup must be silent");}
 int main(int argc,char** argv){
   const unsigned n=argc>1?std::atoi(argv[1]):0;
-  boot(n==7);
+  boot(n==7 || n==97);
+  // Mood tests begin after the plain introduction; dedicated cases exercise boot defaults.
+  if((n<94 || n>=98) && n!=7)plainRemaining=0;
   // Legacy scenarios explicitly exercise the baseline routine; new cases verify production defaults.
   if(n<61)for(auto &v:nextVariant)v=0;
   if(n<=6){
@@ -222,6 +224,75 @@ int main(int argc,char** argv){
     check(!surrendered && face::shown!=face::Expression::Surrender,"fresh ON must clear surrender");cancel();
   } else if(n==85){
     advance(60000);check(!surrendered && face::shown!=face::Expression::Surrender,"idle boot must not surrender");
+  }
+  else if(n==86){
+    advance(65000);
+    check(state==State::Idle && angle==180 && plays==0,"sleep stays still and silent");
+    for(unsigned count:sound::cues)check(count==0,"sleep and dreams must never schedule audio");
+  } else if(n==87){
+    select(4);trigger();until(State::WaitOff);check(sound::cues[3]==1,"surrender squeak once at home");
+    advance(12000);check(sound::cues[3]==1,"held ON must not replay surrender");cancel();
+  } else if(n>=88 && n<=90){
+    select(0);trigger();surprise=surprises::Kind(n-87);startResponse(fakeNow);
+    check(sound::cues[n-88]==1,"special sound matches performance");cancel();
+  }
+  else if(n==91){
+    for(unsigned win=0;win<4;++win){
+      select(4);trigger();until(State::Holding);cancel();
+      if(win<3)check(sound::cues[4+win]==1 && sound::active,"victory cue must survive OFF at home");
+      else check(!sound::active,"no victory sound after the first three wins");
+      advance(1500);check(!sound::active,"celebration audio stops at its deadline");
+    }
+    for(unsigned cue=4;cue<7;++cue)check(sound::cues[cue]==1,"each victory tune plays exactly once");
+  } else if(n==92){
+    select(4);trigger();until(State::Holding);cancel();check(sound::active,"victory starts");
+    fakeOn=true;advance(1);check(!sound::active,"switch edge cuts victory sound");
+    advance(30);check(state==State::ResponsePause && sound::active,"fresh activation replaces victory audio");
+    cancel();
+  } else if(n==93){
+    select(4);trigger();complete();
+    for(unsigned cue=4;cue<7;++cue)check(sound::cues[cue]==0,"failed push cannot play victory");
+  }
+  else if(n==94){
+    for(unsigned i=0;i<2;++i){
+      trigger();check(plainCycle && cycleBehavior.routine==Routine::Swat,"first two flips use simple movement");
+      until(State::Holding);check(angle==60 && pushes==i+1,"single direct intro push");cancel();
+      check(!celebrating && !surrendered && victories==0,"intro has no special reactions");
+      for(unsigned cue:sound::cues)check(cue==0,"intro has no special sounds");
+    }
+    for(unsigned variant:nextVariant)check(variant==1,"intro preserves expressive variants");
+    trigger();check(!plainCycle && mind.activations==3,"third flip unlocks personality accumulated during intro");
+    until(State::ScriptMove);cancel();
+  } else if(n==95){
+    select(5);trigger();complete();
+    check(pushes==1 && !surrendered && sound::cues[3]==0,"failed intro push must wait without furious retry or surrender theatre");
+  } else if(n==96){
+    fakeOn=true;advance(31);check(plainRemaining==1,"accepted activation consumes intro slot");cancel();
+    trigger();check(plainCycle,"second activation still simple");until(State::Holding);cancel();
+    advance(65000);check(plainRemaining==0,"sleep does not restart introduction");
+  } else if(n==97){
+    tick();check(plainCycle && plainRemaining==1,"held ON at boot uses first intro slot");complete();
+    check(pushes==1 && !surrendered,"boot intro stays bounded");
+  }
+  else if(n>=98 && n<=101){
+    select(4);nextVariant[unsigned(Routine::Swat)]=3;trigger();until(State::AnnoyedWait);
+    const auto start=fakeNow;
+    check(angle==180 && face::shown==face::Expression::Sigh,"ignore routine stows arm and displays bored face");
+    if(n==99){advance(2000);cancel();check(pushes==0 && sound::cues[7]==0,"OFF cancels before sigh");}
+    else {
+      advance(3999);check(angle==180 && sound::cues[7]==0,"arm remains home before sigh");
+      advance(1);check(sound::cues[7]==1,"sigh once at four seconds");
+      if(n==100){cancel();check(pushes==0,"OFF during sigh cancels push");}
+      else if(n==101){fakeOn=false;advance(31);select(0);trigger();check(!annoyedSigh,"new activation replaces wait");cancel();}
+      else {advance(999);check(state==State::AnnoyedWait && angle==180,"full five-second wait");
+        until(State::Holding);check(fakeNow-start>=5000 && angle==60,"single blunt push after wait");
+        complete();check(pushes==1 && sound::cues[7]==1,"one push and one sigh");}
+    }
+  }
+  else if(n==102){
+    select(4);trigger();until(State::Holding);fakeOn=false;advance(31);
+    select(4);nextVariant[unsigned(Routine::Swat)]=3;trigger();until(State::AnnoyedWait);
+    check(angle==180,"rapid retry must stow before ignoring, not hold against switch");cancel();
   }
   check(state==State::Idle && angle==config::HOME_DEG,"must finish at rest");
   std::printf("PASS scenario %u\n",n);

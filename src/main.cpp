@@ -14,13 +14,16 @@ using personality::Routine;
 enum class State { Startup, Idle, ResponsePause, Preparing, Prepared, Reacting, Approaching, Peeking,
   GreetingOut, GreetingPause, GreetingBack, GreetingBackPause,
   InspectCloser, InspectPause, SuspiciousBack, SuspiciousPause,
-  Extending, Holding, Recoil, RecoilPause, Retracting, Settling, MischiefWait, WaitOff, ScriptMove, ScriptPause, Anticipate, AnticipatePause, FakeSleep, FakePeek, RareSurprise };
+  Extending, Holding, Recoil, RecoilPause, Retracting, Settling, MischiefWait, WaitOff, ScriptMove, ScriptPause, Anticipate, AnticipatePause, FakeSleep, FakePeek, RareSurprise, AnnoyedStow, AnnoyedWait };
 State state = State::Startup;
 uint32_t stateSince=0, rawSince=0, lastStep=0, lastRestTick=0, lastReport=0;
 bool rawOn=false, stableOn=false, startupComplete=false;
 bool feintPending=false;
 bool surrendered=false;
 uint8_t jabs=0;
+uint8_t plainRemaining=config::PLAIN_START_ACTIVATIONS;
+bool plainCycle=false;
+bool annoyedSigh=false, sighed=false;
 surprises::Selector surpriseSelector;
 surprises::Kind surprise=surprises::Kind::None;
 uint32_t surpriseSince=0;
@@ -87,10 +90,14 @@ void beginScriptStep(uint32_t now) {
 }
 void startResponse(uint32_t now) {
   feintPending=false; jabs=0;
+  if(plainCycle){enter(State::Extending,now,F("Simple push"));return;}
+  if(annoyedSigh){enter(State::AnnoyedStow,now,F("Ignoring you..."));return;}
   if(anticipate){enter(State::Anticipate,now,F("I saw that coming"));return;}
   if(pretendSleep){enter(State::FakeSleep,now,F("Definitely asleep..."));return;}
   if(surprise!=surprises::Kind::None){
     surpriseSince=now;
+    sound::playCue(surprise==surprises::Kind::SystemError?sound::Cue::SystemError:
+        surprise==surprises::Kind::Countdown?sound::Cue::Countdown:sound::Cue::Deadpan,now);
     Serial.print(F("Rare surprise="));Serial.println(uint8_t(surprise));
     enter(State::RareSurprise,now,F("Something unexpected"));return;
   }
@@ -117,7 +124,7 @@ void loop(){
   updateSwitch(now);
   if(!stableOn)surrendered=false;
   // Only an OFF edge while actually pushing qualifies as a win.
-  if(wasOn && !stableOn && state==State::Holding && victories<3)victoryPending=true;
+  if(wasOn && !stableOn && state==State::Holding && !plainCycle && victories<3)victoryPending=true;
   if(state!=State::Idle || stableOn || rawOn){
     if(startupComplete && state!=State::Idle)mind.disturbed();
     lastRestTick=now;
@@ -125,19 +132,30 @@ void loop(){
   if(switchGate.accept(stableOn,now,!startupComplete)){
     quickStreak=switchGate.quick(now) ? (quickStreak%3+1) : 0;
     mind.activate();cycleBehavior=mind.behavior();
-    anticipate=quickStreak>=3 && quickStreak%3==0 && cycleBehavior.routine!=Routine::Creep;
-    pretendSleep=false;
-    if(cycleBehavior.routine==Routine::FakeOut){
-      playfulEncounters=(playfulEncounters+1)%2;
-      pretendSleep=playfulEncounters==0 && !anticipate;
-    }
-    surprise=surpriseSelector.choose(now,!anticipate && !pretendSleep && cycleBehavior.routine!=Routine::Creep);
+    plainCycle=plainRemaining>0;
+    if(plainCycle)--plainRemaining;
+    anticipate=false;pretendSleep=false;surprise=surprises::Kind::None;
+    annoyedSigh=false;sighed=false;
     victoryPending=false;celebrating=false;surrendered=false;
-    // Rotate per mood, not globally: returning to a mood gives its next distinct routine.
-    const uint8_t routine=static_cast<uint8_t>(cycleBehavior.routine);
-    motionVariant=nextVariant[routine];
-    nextVariant[routine]=(motionVariant+1)%3;
-    sound::play(mind.mood(),now);reportMood();
+    if(plainCycle){
+      cycleBehavior={0,0,0,0,0};
+      cycleBehavior.routine=Routine::Swat;
+      motionVariant=0;
+    } else {
+      anticipate=quickStreak>=3 && quickStreak%3==0 && cycleBehavior.routine!=Routine::Creep;
+      if(cycleBehavior.routine==Routine::FakeOut){
+        playfulEncounters=(playfulEncounters+1)%2;
+        pretendSleep=playfulEncounters==0 && !anticipate;
+      }
+      // Intro pushes do not consume any of the mood choreography variants.
+      const uint8_t routine=static_cast<uint8_t>(cycleBehavior.routine);
+      motionVariant=nextVariant[routine];
+      nextVariant[routine]=(motionVariant+1)%(cycleBehavior.routine==Routine::Swat?4:3);
+      annoyedSigh=cycleBehavior.routine==Routine::Swat && motionVariant==3;
+      if(annoyedSigh)anticipate=false;
+      surprise=surpriseSelector.choose(now,!annoyedSigh && !anticipate && !pretendSleep && cycleBehavior.routine!=Routine::Creep);
+    }
+    sound::play(plainCycle?personality::Mood::Happy:mind.mood(),now);reportMood();
     Serial.print(F("Motion variant="));Serial.println(motionVariant+1);
     feintPending=false; jabs=0;
     enter(State::ResponsePause,now,F("Listening..."));
@@ -154,6 +172,16 @@ void loop(){
       }
       break;
     case State::Idle:break;
+    case State::AnnoyedStow:
+      // A rapid re-flip may find the arm near contact: stow before the long wait.
+      if(moveTo(config::HOME_DEG,now,0))enter(State::AnnoyedWait,now,F("Not interested"));
+      break;
+    case State::AnnoyedWait:
+      if(!sighed && elapsed(now,stateSince,config::ANNOYED_IGNORE_MS-1000)){
+        sighed=true;sound::playCue(sound::Cue::Sigh,now);
+      }
+      if(elapsed(now,stateSince,config::ANNOYED_IGNORE_MS))enter(State::Extending,now,F("Fine. Whatever."));
+      break;
     case State::RareSurprise:
       // Stay home for the visual joke, then make one decisive, ordinary push.
       moveTo(config::HOME_DEG,now,0);
@@ -243,7 +271,7 @@ void loop(){
     case State::Holding:
       if(elapsed(now,stateSince,config::PUSH_HOLD_MS)){
         if(surprise==surprises::Kind::None && cycleBehavior.routine==Routine::DoubleJab && jabs<2)enter(State::Recoil,now,F("One more jab"));
-        else {feintPending=false;surrendered=true;enter(State::Retracting,now,F("You win; returning home"));}
+        else {feintPending=false;surrendered=!plainCycle;enter(State::Retracting,now,F("You win; returning home"));}
       }
       break;
     case State::Recoil:
@@ -262,9 +290,12 @@ void loop(){
           feintPending=false;
           if(!stableOn && victoryPending && victories<3){
             ++victories;celebrating=true;victorySince=now;
+            sound::playCue(victories==1?sound::Cue::VictoryTada:
+                victories==2?sound::Cue::VictoryTease:sound::Cue::VictoryFlourish,now);
           }
           victoryPending=false;
           enter(stableOn?State::WaitOff:State::Idle,now,F("Stowed"));
+          if(stableOn && surrendered)sound::playCue(sound::Cue::Surrender,now);
         }
       }
       break;
@@ -278,13 +309,16 @@ void loop(){
       break;
   }
   if(mind.mood()!=reportedMood || elapsed(now,lastReport,5000)){reportMood();lastReport=now;}
-  if(!stableOn || state==State::Idle || state==State::WaitOff)sound::stop();
-  sound::update(now);
   if(celebrating && elapsed(now,victorySince,1400))celebrating=false;
+  const bool victoryAudio=celebrating && state==State::Idle && !stableOn && !rawOn;
+  if(!victoryAudio && (!stableOn || state==State::Idle || (state==State::WaitOff && !surrendered)))sound::stop();
+  sound::update(now);
   face::Expression expression=face::Expression::Normal;
   const bool rareFace=surprise!=surprises::Kind::None &&
       (state==State::RareSurprise || state==State::Extending || state==State::Holding);
   if(surrendered && state==State::WaitOff)expression=face::Expression::Surrender;
+  else if(state==State::AnnoyedWait)expression=face::Expression::Sigh;
+  else if(annoyedSigh && (state==State::Extending || state==State::Holding))expression=face::Expression::Deadpan;
   else if(rareFace)expression=surprise==surprises::Kind::SystemError?face::Expression::SystemError:
       surprise==surprises::Kind::Countdown?face::Expression::Countdown:face::Expression::Deadpan;
   else if(state==State::Anticipate || state==State::AnticipatePause)expression=face::Expression::Knowing;
@@ -292,5 +326,8 @@ void loop(){
   else if(state==State::FakePeek)expression=face::Expression::Peek;
   else if(celebrating && state==State::Idle)expression=face::Expression::Victory;
   face::expression(expression,rareFace?surpriseSince:expression==face::Expression::Victory?victorySince:stateSince,victories);
-  face::update(now,mind.mood(),state==State::Peeking || state==State::InspectPause || state==State::SuspiciousPause || state==State::ScriptPause);
+  const auto actualMood=mind.mood();
+  const auto displayedMood=plainCycle && actualMood!=personality::Mood::Asleep && actualMood!=personality::Mood::Sleepy
+      ? personality::Mood::Happy:actualMood;
+  face::update(now,displayedMood,state==State::Peeking || state==State::InspectPause || state==State::SuspiciousPause || state==State::ScriptPause);
 }

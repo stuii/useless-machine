@@ -52,6 +52,8 @@ static_assert((HOME_DEG > PUSH_DEG && TIRED_PEEK_DEG < HOME_DEG && TIRED_PEEK_DE
 constexpr uint16_t ARM_STEP_PERCENT = 10; // Scale the remaining ramped movements.
 static_assert(ARM_STEP_PERCENT > 0 && ARM_STEP_PERCENT <= 100, "Arm speed scale must be 1..100 percent");
 constexpr uint32_t DEBOUNCE_MS = 30;
+constexpr uint16_t ANNOYED_IGNORE_MS = 5000;
+constexpr uint8_t PLAIN_START_ACTIVATIONS = 2; // Simple push/return before personality performances.
 constexpr uint16_t RESPONSE_PAUSE_MS = 400; // Let the interaction sound lead every arm response.
 constexpr uint32_t REACTION_MS = 250; // Happy reaction pause.
 constexpr uint32_t STEP_MS = 20; // One degree per step; larger is slower.

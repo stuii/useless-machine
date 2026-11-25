@@ -21,3 +21,7 @@ struct SerialStub {
  template<class T> void println(T) {}
 };
 static SerialStub Serial;
+
+extern unsigned hostToneHz;
+inline void tone(int,unsigned hz){hostToneHz=hz;}
+inline void noTone(int){hostToneHz=0;}

@@ -129,7 +129,7 @@ The 30 ms debounce applies to every switch change. OFF cancels a pending fake-ou
 
 One servo only: D9 arm, D4 switch, D7 grid, D8 passive piezo. D11 is unused; there is no lid/pivot sequencing or clearance wait. The arm itself must clear the physical box throughout all gestures. Startup commands 180Â° during the 2.4-second silent face intro, then enables interactions. ON at boot gets one routine; OFF at boot remains asleep at rest.
 
-The face keeps its mood transitions, blinking, breathing and a continuous stream of two 4Ã—4 Zs. The letters move upward every 160 ms, staggered by five frames, and fully exit the top before restarting; rows 5â€“7 remain reserved for the face. Sound occurs only on accepted interactions; no sound on recovery/sleep or extra gesture stages. Timer1 drives one Servo object. LED transfers start at 4â€“14 ms of its 20 ms frame and require D9 LOW. The arm remains attached at home.
+The face keeps its mood transitions, blinking, breathing and a continuous stream of two 4Ã—4 Zs. The letters move upward every 160 ms, staggered by five frames, and fully exit the top before restarting; rows 5â€“7 remain reserved for the face. Interaction sounds start on accepted activations; special performances add matching cues. Sleep and dreams are silent. Timer1 drives one Servo object. LED transfers start at 4â€“14 ms of its 20 ms frame and require D9 LOW. The arm remains attached at home.
 
 Sleepy/asleep motion profiles exist, but ordinary activation clears quiet time before routine selection, so their faces occur during rest while their motion profiles are normally unreachable. Tests cover active moods, cancellation, quick repeats including tired, bounded furious retries, startup, debounce and millis rollover.
 
@@ -161,10 +161,10 @@ These are temporary performances layered over the existing mood parameters:
 
 - **I saw that coming:** every third consecutive quick re-flip (ON within 1.2 seconds of OFF) earns a knowing wink, a fast move to 80°, a 550 ms stare, then a direct push to 60°. Tired keeps its usual creep instead. A slower re-flip resets the streak.
 - **Fake sleep:** every second playful encounter pretends to sleep at 180° for 1.3 seconds, opens one eye for 650 ms, then slams. Anticipation takes precedence if both qualify. Normal playful encounters retain their rotating fake-outs.
-- **Victory:** only the first three OFF edges detected while pushing after each power-up qualify. After retracting, the display celebrates for 1.4 seconds: wink/confetti, pulsing heart, then colorful border confetti. A new ON immediately interrupts it. An aborted approach or a failed push never counts. Celebrations are silent and keep the arm home.
-- **Dreaming:** after 12 seconds continuously asleep, a dim thought picture fades in and out for 3.2 seconds, repeating every 18 seconds. Heart, star, and switch pictures cycle above the sleeping face. Normal moving Zs return between dreams. Dreams are silent and cause no arm motion.
+- **Victory:** only the first three OFF edges detected while pushing after each power-up qualify. After retracting, the display celebrates for 1.4 seconds: wink/confetti, pulsing heart, then colorful border confetti. A new ON immediately interrupts it. An aborted approach or a failed push never counts. Celebrations keep the arm home and play one matching melody: ta-da, na-na boo-boo, or a rising flourish.
+- **Dreaming:** after 12 seconds continuously asleep, a dim thought picture fades in and out for 3.2 seconds, repeating every 18 seconds. Heart, star, and switch pictures cycle above the sleeping face. Normal moving Zs return between dreams. Dreams cause no arm motion or sound.
 
-All responses retain the 400 ms sound lead-in, switch debouncing, OFF cancellation, and calibrated 180° rest / 60° push. No new mood parameters or extra idle sounds are introduced.
+All responses retain the 400 ms sound lead-in, switch debouncing, OFF cancellation, and calibrated 180° rest / 60° push. Ordinary idle states are silent; earned victory celebrations play a melody.
 
 ```mermaid
 flowchart TD
@@ -180,7 +180,7 @@ flowchart TD
     PUSH --> OFF{OFF while holding push?}
     OFF -->|Yes| HOME[Retract home]
     HOME --> LIMIT{Fewer than three victories since boot?}
-    LIMIT -->|Yes| WIN[Next silent display celebration; 1400 ms]
+    LIMIT -->|Yes| WIN[Next display celebration and melody; 1400 ms]
     LIMIT -->|No| IDLE[Idle]
     WIN --> IDLE
     IDLE --> SLEEP[Asleep for 12 seconds]
@@ -208,7 +208,7 @@ flowchart TD
     DEAD --> PUSH
 ```
 
-All three keep the arm home during their visual performance, retain normal mood parameters, and remain cancellable on OFF. They do not add idle sounds or reset the controller.
+All three keep the arm home during their visual performance, retain normal mood parameters, and remain cancellable on OFF. They play matching interaction cues and do not reset the controller.
 
 ## Surrender after unsuccessful attempts
 
@@ -221,10 +221,39 @@ flowchart TD
     JAB --> HOLD
     RETRY -->|No| RETURN[You win: retract fully and settle]
     RETURN --> STILL{Switch still ON?}
-    STILL -->|Yes| SURRENDER[Embarrassed face and waving white flag; silent; arm home]
+    STILL -->|Yes| SURRENDER[Embarrassed face and waving white flag; one squeak; arm home]
     STILL -->|No| IDLE[Clear surrender; idle]
     SURRENDER -->|Held ON| SURRENDER
     SURRENDER -->|OFF| IDLE
 ```
 
-Surrender is a temporary expression, not a parameter reset. It performs no additional pushes or sounds. A fresh OFF-to-ON starts a normal interaction. Rare surprises have a single-push budget even when the underlying mood is furious.
+Surrender is a temporary expression, not a parameter reset. It performs no additional pushes and gives a single descending squeak after reaching home. A fresh OFF-to-ON starts a normal interaction. Rare surprises have a single-push budget even when the underlying mood is furious.
+
+## Sound timing
+
+- The 400 ms mood-sound lead-in remains on every accepted activation.
+- System error adds a short glitch phrase when the animation begins; deadpan adds a flat bloop.
+- Countdown ticks begin with the performance and repeat at 700 and 1400 ms, matching the digits.
+- Surrender squeaks once after retraction and settling. Holding ON does not replay it.
+- OFF cancels interaction cues; a fresh activation replaces them. Global sound disable mutes all cues.
+
+Victory audio starts once after a successful push has returned home and settled. The first three celebrations use ta-da, a teasing na-na boo-boo cadence, and a rising flourish respectively. Tunes fit within the 1.4-second visual celebration and contain rests for face updates. A raw switch ON cuts off the tune; the debounced interaction then starts its response sound. Failed attempts and later wins do not trigger victory tunes.
+
+## First two activations
+
+The first two accepted activations per power-up bypass mood choreography and special performances: happy face/sound, 400 ms lead-in, one direct push, then return and settle. Failed pushes simply wait for OFF; successful pushes do not spend a victory celebration. Parameters still update. On the third activation, normal mood selection and special-behavior eligibility apply. Mood variant rotations remain untouched during the introduction. A cancelled accepted activation counts toward the two; a switch held ON at boot counts once after startup. Sleep does not reset this counter.
+
+## Annoyed: reluctant compliance
+
+Annoyed rotates through four variants (2, 3, 4, 1). Variant 4 takes precedence over anticipation and surprise selection, after the two plain introductory activations.
+
+```mermaid
+flowchart LR
+    PAUSE[400 ms response pause] --> STOW[Stow arm if needed]
+    STOW --> WAIT[Stay home for 5 seconds]
+    WAIT --> SIGH[At 4 seconds: eyes close, mouth exhales, descending sigh]
+    SIGH --> PUSH[At 5 seconds: one quick expressionless push]
+    PUSH --> RETURN[Retract; usual victory or surrender handling]
+```
+
+OFF cancels every stage; a fresh ON replaces the routine. The wait never holds the arm against the switch. All other moods retain their three-variant rotations.

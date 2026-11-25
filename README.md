@@ -44,6 +44,8 @@ The arm rests at **180 degrees** and pushes the switch at **60 degrees**. These 
 
 On power-up, the arm is commanded home while a silent 2.4-second rainbow animation fills the grid and fades into the sleeping face. The machine starts asleep. A switch already ON at startup triggers one response after the intro.
 
+The first two accepted activations after power-up use a happy face and sound, the usual 400 ms response pause, then a single direct push and return. They skip expressive gestures, surprises, victory celebrations, and surrender performances. Personality parameters still accumulate in the background, so the third activation begins mood-based behavior. The first three victory celebrations are reserved for successful pushes after this introduction. Sleep does not restart the introduction; `PLAIN_START_ACTIVATIONS` sets its length.
+
 Each accepted ON starts a mood-specific sound and waits **400 ms** before issuing an arm movement. The response can include gestures and additional pauses before the push. A stable OFF stops the sound, cancels pending gestures or jabs, and retracts the arm. Switch debounce is **30 ms**. A fresh OFF-to-ON can interrupt the current response.
 
 Actual pushes command 60 degrees directly, without a software speed ramp. Each push is held for at most 500 ms; returning home includes 500 ms settling. A switch held ON does not trigger endless retries. The arm stays attached at home, including during sleep.
@@ -52,7 +54,7 @@ The firmware tracks commanded angles, not shaft position or force. Check linkage
 
 ## Moods and movement
 
-Each active mood has three rotating movement sequences. Its rotation starts at variant 2 and continues 3, 1, 2. The serial monitor prints the selected variant. Special interaction tricks can take precedence over these sequences.
+Each active mood has three rotating movement sequences, except annoyed, which has four. Rotations start at variant 2; annoyed cycles 2, 3, 4, 1, while the others cycle 2, 3, 1. The serial monitor prints the selected variant. Special interaction tricks can take precedence over these sequences.
 
 | Mood | Variant 1 | Variant 2 | Variant 3 |
 |---|---|---|---|
@@ -64,6 +66,8 @@ Each active mood has three rotating movement sequences. Its rotation starts at v
 | Furious | Swat, with a second jab if still ON | Short wind-up shake before attacking | Charge, brake, recoil, attack |
 | Tired | Slow creep, pause, slam | Two sleepy nods before creeping | Two droopy false starts before creeping |
 
+**Annoyed variant 4: "Fine. Whatever."** The arm stays at home for five seconds after the usual response pause. During the last second, the face closes its eyes and opens its mouth in an exasperated sigh, accompanied by a descending sound. It then makes one quick, expressionless push and retracts. If a rapid re-flip catches the arm extended, it first stows it before waiting. OFF cancels the wait or sigh. This variant takes precedence over anticipation and surprise selection for that activation; it is excluded from the first two plain activations. `ANNOYED_IGNORE_MS` sets the wait.
+
 Tired always creeps to **100 degrees at 18 ms per degree**, pauses for **900 ms**, then slams to 60 degrees and retracts slowly. If interrupted at or beyond the creep stop, it returns home before starting that approach again.
 
 Furious allows at most two actual pushes per activation. If the switch remains ON after the first push, it recoils to 108 degrees, waits 300 ms, and jabs again. OFF cancels the second jab. Other routines make one actual push.
@@ -72,12 +76,12 @@ Sleepy and asleep are resting expressions. An activation wakes the personality a
 
 ## Interaction tricks
 
-- **You win:** if the switch stays ON after the allowed attempts (one push, or up to two for furious), the arm retracts fully and the face shows downcast eyes, blushing cheeks, a crooked mouth, and a tiny waving white flag. It stays silently surrendered at home until OFF, with no further pushes. Turning OFF during retraction cancels the surrender; a successful push follows the victory path instead. The serial monitor prints `You win; returning home` when the attempt budget is exhausted.
+- **You win:** if the switch stays ON after the allowed attempts (one push, or up to two for furious), the arm retracts fully and the face shows downcast eyes, blushing cheeks, a crooked mouth, and a tiny waving white flag. It gives one falling squeak after retracting, then stays silently surrendered at home until OFF, with no further pushes. Turning OFF during retraction cancels the surrender; a successful push follows the victory path instead. The serial monitor prints `You win; returning home` when the attempt budget is exhausted.
 
 - **I saw that coming:** every third consecutive quick re-flip earns a knowing wink, a dart to 80 degrees, a 550 ms stare, then a push. A quick re-flip means ON within 1.2 seconds of OFF; a slower one resets the streak. Tired keeps its creep routine.
 - **Fake sleep:** every second playful encounter stays home with closed eyes for 1.3 seconds, opens one eye for 650 ms, then slams. Anticipation takes precedence if both qualify.
-- **Victory celebrations:** an OFF edge while holding a push qualifies for a celebration after retraction. The first three celebrations per power-up are wink/confetti, a pulsing heart, and colorful border confetti. Each lasts 1.4 seconds, stays silent, and keeps the arm home. Another ON interrupts it.
-- **Dreaming:** after 12 seconds continuously asleep, a dim heart, star, or switch fades above the sleeping face for 3.2 seconds. Dreams repeat every 18 seconds, cycling through the pictures. Moving Zs return between dreams. The arm stays still and the piezo stays silent.
+- **Victory celebrations:** an OFF edge while holding a push qualifies for a celebration after retraction. The first three celebrations per power-up are wink/confetti, a pulsing heart, and colorful border confetti. Each lasts 1.4 seconds and keeps the arm home. The matching melodies are a ta-da fanfare, a teasing na-na boo-boo cadence, and a rising flourish. Each plays once after retraction; another switch ON immediately cuts it off.
+- **Dreaming:** after 12 seconds continuously asleep, a dim heart, star, or switch fades above the sleeping face for 3.2 seconds. Dreams repeat every 18 seconds, cycling through the pictures. Moving Zs return between dreams. The arm stays still and dreams are silent.
 
 ### Rare surprises
 
@@ -87,7 +91,7 @@ After the first four interactions, eligible pokes have a 1-in-12 chance of repla
 - **Dramatic countdown:** the grid counts 3, 2, 1 in changing colors, spending 700 ms on each digit before the slam.
 - **Deadpan:** flat eyes and a straight mouth, an unblinking 1.1-second stare at home, then one plain push.
 
-The arm stays home during the performance. Each retains the 400 ms sound lead-in and uses the normal interaction sound. OFF cancels the pending push; another ON replaces the performance. Tired, anticipation, and fake sleep take priority.
+The arm stays home during the performance. Each retains the 400 ms mood-sound lead-in, followed by its own cue: a glitch chirp, 700 ms countdown ticks, or a flat deadpan bloop. OFF cancels the pending push; another ON replaces the performance. Tired, anticipation, and fake sleep take priority.
 
 After a surprise, at least eight intervening interactions and 45 seconds must pass before another can be selected. Consecutive surprises never use the same performance. Selection mixes interaction timing into a private pseudorandom generator; it does not run on a fixed flip count. Serial output identifies the selection as `Rare surprise=1/2/3` in the order above.
 
@@ -127,7 +131,9 @@ The panel uses straight rows, no rotation, and no mirroring. Brightness is **10/
 | `SLEEP_Z_STATIC_TEST` | Freeze Z motion for orientation checks |
 | `SOUND_ENABLED` | Enable or mute the piezo |
 
-The passive piezo plays mood-specific phrases with 4 ms pitch updates. Sound starts only on accepted interaction and stops on OFF. Startup, recovery, sleep, dreams, and celebrations are silent.
+The passive piezo plays mood-specific phrases with 4 ms pitch updates. Special performances add a glitch chirp, countdown ticks aligned with 3-2-1, or a flat deadpan bloop. Surrender gives one descending squeak after the arm returns home. OFF cancels interaction audio; a fresh interaction replaces the current phrase.
+
+Startup, sleep, dreams, and ordinary idle recovery are silent. Victory tunes play only during an earned celebration. `SOUND_ENABLED=false` mutes all interaction sounds.
 
 Servo timing uses Timer1; Arduino `tone` uses Timer2. WS2812B transfers start within the 4-14 ms portion of the servo's 20 ms frame while D9 is LOW, and face updates avoid active audible tones. This scheduling assumes one Servo 1.2.2 object on the 16 MHz ATmega328P.
 
@@ -152,15 +158,24 @@ Build the firmware with PlatformIO. Compile the logic checks with the AVR toolch
 avr-g++ -mmcu=atmega328p -std=c++14 -Iinclude -c tests/logic_checks.cpp -o .pio/logic_checks.o
 ```
 
-The host simulator has 86 scenarios covering mood routines, gesture cancellation, switch debounce, held-ON limits, rapid re-flips, tired approaches, startup, timing rollover, anticipation, fake sleep, victory limits, and the dream schedule. With Zig installed and available on PATH, run from PowerShell:
+The host simulator has 103 scenarios covering mood routines, gesture cancellation, switch debounce, held-ON limits, rapid re-flips, tired approaches, startup, timing rollover, anticipation, fake sleep, victory limits, and the dream schedule. With Zig installed and available on PATH, run from PowerShell:
 
 ```powershell
 zig c++ -target x86_64-windows-gnu -std=c++14 -Itests/host -Iinclude tests/host/mechanism_test.cpp -o .pio/mechanism_test.exe
 if ($LASTEXITCODE -ne 0) { throw 'Simulator build failed' }
-0..85 | ForEach-Object {
+0..102 | ForEach-Object {
     & ./.pio/mechanism_test.exe $_
     if ($LASTEXITCODE -ne 0) { throw "Simulation failed: $_" }
 }
 ```
 
 Simulations verify controller behavior, not physical travel, torque, current, or LED appearance. Check those on the assembled machine.
+
+Audio playback can also be tested independently, including exact countdown timing, cancellation, and timer rollover:
+
+```powershell
+zig c++ -target x86_64-windows-gnu -std=c++14 -Itests/host -Iinclude tests/host/sound_test.cpp -o .pio/sound_test.exe
+if ($LASTEXITCODE -ne 0) { throw 'Sound test build failed' }
+& ./.pio/sound_test.exe
+if ($LASTEXITCODE -ne 0) { throw 'Sound test failed' }
+```
