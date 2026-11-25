@@ -1,259 +1,164 @@
-# Useless machine: personality and behavior flowchart
+# Personality and behavior flowchart
 
-Updated for one arm servo and one switch on 2026-11-24. Moods are recalculated from the parameters, not selected from a fixed sequence. The machine can skip moods.
+This document describes the current implementation. The [README](../README.md) covers assembly, build commands, calibration, and tests; the [schematic](schematic.svg) records the described wiring.
 
-Source: `include/personality.h`, `include/interaction.h`, `src/main.cpp`, `src/face.cpp`, and `include/sound_patterns.h`.
+## Parameters and recovery
 
-## 1. Actions change its personality
+All parameters are clamped to 0-100. A repeated poke means a previous activation exists and there have been fewer than eight seconds of quiet rest. It is separate from the 1.2-second quick re-flip window.
 
-All parameters stay between **0 and 100**. At startup: energy **90**, annoyance **0**, excitement **0**, curiosity **40**, patience **80**, mischief **25**.
+| Parameter | Initial value | Interaction | Quiet recovery per second |
+|---|---|---|---|
+| Energy | 90 | -4 spaced; -8 repeated | +4 |
+| Annoyance | 0 | +3 spaced; +10 to +15 repeated, depending on patience | -20 |
+| Excitement | 0 | +20 spaced; +24 repeated | -4 |
+| Curiosity | 40 | +22 spaced; -12 repeated | +2 when below 70, capped at 70 |
+| Patience | 80 | -3 spaced; -10 repeated | +5 |
+| Mischief | 25 | +16 spaced or +8 repeated while annoyance is below 55; otherwise -12 | Moves 3 toward 25 |
 
-```mermaid
-flowchart TD
-    INPUT{"What happens?"}
-    INPUT -->|"Fresh ON, stable for 30 ms"| ACCEPT["Accept one interaction<br/>Can interrupt an existing arm routine"]
-    INPUT -->|"Switch stays ON"| HELD["No repeated activation<br/>No recovery"]
-    INPUT -->|"Switch turns OFF"| OFF["Stop sound<br/>Rearm for the next ON<br/>Cancel approach/push and retract"]
-    INPUT -->|"Idle at home, switch OFF"| REST["Accumulate quiet time"]
-    INPUT -->|"Reset / power on"| RESET["Reset personality<br/>Home arm + 2.4 s intro<br/>Start asleep, silently"]
-    ACCEPT --> RAPID{"Previous activation exists<br/>and quiet time below 8 seconds?"}
-    RAPID -->|No| SPACED["Spaced interaction<br/>Annoyance +3<br/>Patience −3<br/>Curiosity +22<br/>Excitement +20"]
-    RAPID -->|Yes| REPEAT["Repeated poking<br/>Annoyance +10 to +15<br/>Lower patience = larger increase<br/>Patience −10<br/>Curiosity −12<br/>Excitement +24"]
-    SPACED --> MISCHIEF{"Updated annoyance below 55?"}
-    REPEAT --> MISCHIEF
-    MISCHIEF -->|Yes| FUN["Mischief increases<br/>+16 spaced / +8 repeated"]
-    MISCHIEF -->|No| UNFUN["Mischief −12"]
-    FUN --> COST["Energy −4 spaced / −8 repeated<br/>Play streak +1, or reset to 1 after quiet break<br/>Activation count +1<br/>Quiet timer resets"]
-    UNFUN --> COST
-    COST --> SELECT["Recalculate mood<br/>Choose arm routine and sound"]
-    REST --> SECOND["Every quiet second:<br/>Excitement −4"]
-    SECOND --> ANGER["After 2 quiet seconds: annoyance −20 per second"]
-    ANGER --> GRACE{"At least 2 quiet seconds?"}
-    GRACE -->|No| RECALC["Recalculate mood<br/>Update face; stay silent"]
-    GRACE -->|Yes| RECOVER["Each second:<br/>Energy +4<br/>Patience +5<br/>Mischief moves 3 toward 25"]
-    RECOVER --> NOVELTY["Curiosity gradually rebuilds toward 70<br/>+2 each recovery second"]
-    NOVELTY --> RECALC
-```
 
-For repeated poking, the exact annoyance increase is `10 + floor((100 − patience) / 20)`, using patience **before** that poke.
+Repeated annoyance gain is `10 + floor((100 - patience) / 20)`, evaluated before subtracting patience. Mischief uses annoyance after its increase. An activation increments the play streak up to three, or resets it to one after a quiet break, and resets quiet time. Cancelled activations retain their parameter changes.
 
-Quiet time starts only once the arm finishes returning and settling. Movement or a held-ON switch prevents recovery. Cancelling an interaction does **not** refund its parameter changes. A switch already ON at startup gets one attempt after startup settling.
-
-Quiet time saturates at 300 seconds. Anger and other recovery begin at 2 seconds; the separate repeated-poking window remains 8 seconds. From total depletion, energy is full by 26 quiet seconds, and curiosity reaches 70 by 36 seconds. Curiosity above 70 is not reduced by recovery.
-
-## 2. Parameters select the mood and response
-
-Read from top to bottom. **The first matching condition wins.**
+Recovery runs only while idle at home with both raw and debounced switch states OFF. Excitement decays each quiet second; other recovery starts at two seconds. Moving or holding ON prevents recovery. Quiet time saturates at 300 seconds. Curiosity above 70 is not reduced by recovery. Dreams and victory celebrations do not prevent idle recovery.
 
 ```mermaid
 flowchart TD
-    START["Evaluate current parameters"] --> Q1{"Quiet ≥60 seconds<br/>and annoyance below 20?"}
-    Q1 -->|Yes| SLEEP["ASLEEP<br/>Closed eyes + breathing + drifting Zs<br/>Silent; arm stays home"]
-    Q1 -->|No| Q2{"Energy ≤25?"}
-    Q2 -->|Yes| TIRED["TIRED<br/>Droopy face<br/>Slow push and slower retreat<br/>Descending electronic sigh"]
-    Q2 -->|No| Q3{"Annoyance ≥75?"}
-    Q3 -->|Yes| FURIOUS["FURIOUS<br/>Red stare<br/>Immediate, fastest swat<br/>Low pitch dives and warbles"]
-    Q3 -->|No| Q4{"Annoyance ≥55?"}
-    Q4 -->|Yes| ANNOYED["ANNOYED<br/>Amber unimpressed face<br/>Immediate fast swat<br/>Short grumbling sounds"]
-    Q4 -->|No| Q5{"Quiet ≥30 seconds<br/>and excitement below 20?"}
-    Q5 -->|Yes| SLEEPY["SLEEPY<br/>Heavy eyelids<br/>Silent; arm stays home"]
-    Q5 -->|No| Q6{"Annoyance ≥15<br/>and curiosity ≥45<br/>and excitement ≥10?"}
-    Q6 -->|Yes| SUSPICIOUS["SUSPICIOUS<br/>Purple side-eye<br/>Creep out → watch → push<br/>Questioning chirps"]
-    Q6 -->|No| Q7{"Play streak ≥3<br/>Excitement ≥60<br/>and mischief ≥35?"}
-    Q7 -->|Yes| PLAYFUL["PLAYFUL<br/>Lavender wink<br/>Peek → tease → dart forward<br/>Bouncy robotic chatter"]
-    Q7 -->|No| Q8{"Curiosity ≥45<br/>and excitement ≥10?"}
-    Q8 -->|Yes| CURIOUS["CURIOUS<br/>Blue questioning face<br/>Cautious approach → brief inspection → push<br/>Rising and falling chirps"]
-    Q8 -->|No| HAPPY["HAPPY<br/>Mint smile<br/>Short pause → smooth push<br/>Bright rising chirps"]
+    INPUT{Input or rest} -->|Debounced ON edge| ACT[Update all six parameters and play streak]
+    ACT --> RESPONSE[Select response; reset quiet time]
+    INPUT -->|Debounced OFF edge| CANCEL[Cancel pending movement and interaction audio; retract]
+    INPUT -->|Held ON| HOLD[No repeated activation; no recovery]
+    INPUT -->|Idle and OFF| REST[Every second: excitement -4]
+    REST --> DELAY{At least two quiet seconds?}
+    DELAY -->|Yes| RECOVER[Annoyance -20; energy +4; patience +5; curiosity +2 toward 70; mischief 3 toward 25]
+    DELAY -->|No| MOOD[Reevaluate mood]
+    RECOVER --> MOOD
 ```
 
-Sounds happen **only on an accepted activation**. Idle mood changes remain silent. When waking, the activation changes the parameters and resets quiet time **before** selecting the response; it therefore uses a new awake mood.
+## Mood priorities
 
-### Arm timings
+The first matching condition wins. Mood is recalculated from parameters, so it can skip states.
 
-| Mood | Routine |
-|---|---|
-| Happy | Bob out to 160°, hold 250 ms, home, hold 250 ms, swat |
-| Curious | Inspect at 108°, creep to 90°, inspect 300 ms, slam |
-| Suspicious | Approach 108°, hesitate, withdraw to 150°, wait 400 ms, lunge |
-| Playful | Dart to 80°, pause, retract to 180°, settle, hide, slam |
-| Annoyed | Immediate single swat |
-| Furious | Swat, then only if still ON after 500 ms: recoil to 108°, wait 300 ms, second swat; stop after two |
-| Tired | Creep at 18 ms/degree to 100°, wait 900 ms, direct slam to 60°, slow return |
-
-Curious first approach/pause variants: 6/3/0 ms per degree and 120/240/350 ms. Suspicious: 8/5/10 ms per degree and 250/400/550 ms. Playful peek waits: 700/900/1100 ms; hidden waits: 650/850/1050 ms. Variant and routine are frozen per activation. Zero movement interval means a direct command, not instant physical arrival. All angles shown assume home 180° and push 60°.
-
-## 3. Motion and interruption flow
-
-```mermaid
-flowchart TD
-    ON[Accepted ON: update personality and play sound once] --> LEAD[Hold current arm target for 400 ms]
-    LEAD --> VARIANT{Per-mood variant 2 or 3?}
-    PUSH[Direct push to 60 degrees]
-    VARIANT -->|No| MODE{Selected routine}
-    VARIANT -->|Yes| SCRIPT[Play bounded gesture sequence; each step moves then pauses]
-    SCRIPT --> TIRED{Tired routine?}
-    TIRED -->|No| PUSH
-    TIRED -->|Yes| RESET
-    MODE -->|Happy| BOB[Bob to 160; pause; home; pause]
-    BOB --> PUSH
-    MODE -->|Curious| LOOK[Inspect at 108; then at 90]
-    LOOK --> PUSH
-    MODE -->|Suspicious| DOUBT[Approach 108; hesitate; retreat 150; hesitate]
-    DOUBT --> PUSH
-    MODE -->|Playful| TEASE[Dart to 80; pause; return home]
-    TEASE --> HIDE[Settle 500 ms; hide 650 to 1050 ms]
-    HIDE --> PUSH
-    MODE -->|Tired| RESET{Already at or beyond 100 degree peek?}
-    RESET -->|Yes| HOME[Return home and settle]
-    RESET -->|No| CREEP[Creep to 100 at 18 ms per degree]
-    HOME --> CREEP
-    CREEP --> PAUSE[Pause 900 ms]
-    PAUSE --> PUSH
-    MODE -->|Annoyed or Furious| PUSH
-    PUSH --> HOLD[Hold up to 500 ms]
-    HOLD --> AGAIN{Furious, still ON, and only one jab?}
-    AGAIN -->|Yes| RECOIL[Recoil to 108; wait 300 ms]
-    RECOIL --> PUSH
-    AGAIN -->|No| BACK[Retract to 180 and settle 500 ms]
-    BACK --> WAIT{Still ON?}
-    WAIT -->|Yes| BLOCK[Wait for OFF; no repeated routine]
-    WAIT -->|No| IDLE[Idle and recover]
-    BLOCK -->|OFF| IDLE
-    OFF[Debounced OFF during any gesture or pause] --> BACK
-    NEW[Fresh ON replaces any unfinished routine] --> ON
-```
-
-The 30 ms debounce applies to every switch change. OFF cancels a pending fake-out or second jab. A fresh activation replaces old pending actions; it never queues an old surprise push. Quick repeats run the full selected variation after the sound lead-in, including tired creep/pause. A tired repeat starting at or beyond its peek resets home before approaching again. The furious second jab belongs to the same activation and is skipped as soon as OFF is detected.
-
-## 4. Hardware and background activity
-
-One servo only: D9 arm, D4 switch, D7 grid, D8 passive piezo. D11 is unused; there is no lid/pivot sequencing or clearance wait. The arm itself must clear the physical box throughout all gestures. Startup commands 180° during the 2.4-second silent face intro, then enables interactions. ON at boot gets one routine; OFF at boot remains asleep at rest.
-
-The face keeps its mood transitions, blinking, breathing and a continuous stream of two 4×4 Zs. The letters move upward every 160 ms, staggered by five frames, and fully exit the top before restarting; rows 5–7 remain reserved for the face. Interaction sounds start on accepted activations; special performances add matching cues. Sleep and dreams are silent. Timer1 drives one Servo object. LED transfers start at 4–14 ms of its 20 ms frame and require D9 LOW. The arm remains attached at home.
-
-Sleepy/asleep motion profiles exist, but ordinary activation clears quiet time before routine selection, so their faces occur during rest while their motion profiles are normally unreachable. Tests cover active moods, cancellation, quick repeats including tired, bounded furious retries, startup, debounce and millis rollover.
-
-Every accepted activation, including quick repeats, waits RESPONSE_PAUSE_MS = 400 ms after starting sound before dispatching its routine. OFF cancels this pending response and allows immediate retraction.
-
-## 5. Three choreographies per active mood
-
-Each routine keeps its own counter modulo three, advanced on accepted activation, starting with expressive variant 2 then rotating 3 → 1 → 2. Variant one follows the graph's original mood path; variants two and three follow a flash-stored sequence, then perform the direct push (or, for tired, continue through its slow 100° approach and 900 ms pause first). ResponsePause always happens first. Quick repeats no longer bypass theatre.
-
-| Mood | Variant 2 | Variant 3 |
+| Priority | Mood | Condition |
 |---|---|---|
-| Happy | Double greeting bob | Bow, wind back, swat |
-| Curious | Double take with two retreats | Three-step approach, think, back up, inspect |
-| Suspicious | Startle, fully hide, cautious return | Two aborted approaches, disappear, lunge |
-| Playful | Double 80° fake-out and tiny peek | Long hide, two peeks, surprise attack |
-| Annoyed | Two non-contact air-knocks | Freeze near switch, withdraw, swat |
-| Furious | Wind-up shake | Charge, brake, recoil, attack |
-| Tired | Nod off twice | Two droopy false starts |
+| 1 | Asleep | Quiet at least 60 seconds and annoyance below 20 |
+| 2 | Tired | Energy at most 25 |
+| 3 | Furious | Annoyance at least 75 |
+| 4 | Annoyed | Annoyance at least 55 |
+| 5 | Sleepy | Quiet at least 30 seconds and excitement below 20 |
+| 6 | Suspicious | Annoyance at least 15, curiosity at least 45, excitement at least 10 |
+| 7 | Playful | Play streak at least 3, excitement at least 60, mischief at least 35 |
+| 8 | Curious | Curiosity at least 45 and excitement at least 10 |
+| 9 | Happy | Otherwise |
 
-ScriptMove advances nonblocking toward one target. ScriptPause waits its bounded duration before loading the next step. OFF cancels either state; fresh ON replaces the entire remaining sequence after a new 400 ms sound lead-in. Scripted gestures cannot trigger their own personality updates or sounds. Furious's second-jab rule and all rest endpoints remain unchanged.
+Activation updates parameters and clears quiet time before selecting a response. Sleepy/asleep therefore describe rest rather than ordinary activated routines. Startup sets quiet time to the asleep threshold. Parameters and counters reset on power-up; nothing is stored in EEPROM.
 
-## Mood progression tuning
+The first two accepted activations override movement, face, and sound with a plain happy response. The underlying model still advances; serial reports show that underlying mood. Sleepy/asleep rest expressions remain available during the introduction.
 
-Playful requires three pokes in a streak and excitement at least 60. A poke after eight quiet seconds starts a new streak at one; patience, curiosity, energy and anger still affect which mood wins. Spaced pokes cost 4 energy, repeated pokes cost 8. From startup with no recovery, playful first appears on poke three, annoyed on six, furious on seven/eight, and tired on nine. Tired takes priority over furious; fury remains possible when annoyance is high and energy sufficient. Maximum annoyance falls below the annoyed threshold after four idle/OFF seconds and clears after six. All cooldown starts after two quiet seconds. Movement or held ON prevents recovery.
+## Response selection and precedence
 
-## Interaction tricks and dreams
-
-These are temporary performances layered over the existing mood parameters:
-
-- **I saw that coming:** every third consecutive quick re-flip (ON within 1.2 seconds of OFF) earns a knowing wink, a fast move to 80�, a 550 ms stare, then a direct push to 60�. Tired keeps its usual creep instead. A slower re-flip resets the streak.
-- **Fake sleep:** every second playful encounter pretends to sleep at 180� for 1.3 seconds, opens one eye for 650 ms, then slams. Anticipation takes precedence if both qualify. Normal playful encounters retain their rotating fake-outs.
-- **Victory:** only the first three OFF edges detected while pushing after each power-up qualify. After retracting, the display celebrates for 1.4 seconds: wink/confetti, pulsing heart, then colorful border confetti. A new ON immediately interrupts it. An aborted approach or a failed push never counts. Celebrations keep the arm home and play one matching melody: ta-da, na-na boo-boo, or a rising flourish.
-- **Dreaming:** after 12 seconds continuously asleep, a dim thought picture fades in and out for 3.2 seconds, repeating every 18 seconds. Heart, star, and switch pictures cycle above the sleeping face. Normal moving Zs return between dreams. Dreams cause no arm motion or sound.
-
-All responses retain the 400 ms sound lead-in, switch debouncing, OFF cancellation, and calibrated 180� rest / 60� push. Ordinary idle states are silent; earned victory celebrations play a melody.
+Every accepted activation starts its sound and holds the current arm target for 400 ms. The selection order after that pause is:
 
 ```mermaid
 flowchart TD
-    ON[Accepted ON] --> SOUND[Play interaction sound; wait 400 ms]
-    SOUND --> Q{Third quick re-flip and not tired?}
-    Q -->|Yes| KNOW[Knowing wink; dart to 80; wait 550 ms]
-    Q -->|No| F{Every second playful encounter?}
-    F -->|Yes| FAKE[Home; fake sleep 1300 ms; peek 650 ms]
-    F -->|No| NORMAL[Rotating mood choreography]
-    KNOW --> PUSH[Push 60 degrees]
-    FAKE --> PUSH
-    NORMAL --> PUSH
-    PUSH --> OFF{OFF while holding push?}
-    OFF -->|Yes| HOME[Retract home]
-    HOME --> LIMIT{Fewer than three victories since boot?}
-    LIMIT -->|Yes| WIN[Next display celebration and melody; 1400 ms]
-    LIMIT -->|No| IDLE[Idle]
-    WIN --> IDLE
-    IDLE --> SLEEP[Asleep for 12 seconds]
-    SLEEP --> DREAM[Silent dim dream; 3200 ms; repeat every 18 s]
-    DREAM --> IDLE
+    ON[Accepted ON; update parameters] --> LEAD[Response sound; hold current target 400 ms]
+    LEAD --> INTRO{One of first two activations?}
+    INTRO -->|Yes| PLAIN[Happy face and sound; one direct push and return]
+    INTRO -->|No| SIGH{Annoyed variant 4?}
+    SIGH -->|Yes| IGNORE[Stow arm; wait five seconds; sigh during last second; direct push]
+    SIGH -->|No| ANTICIPATE{Third consecutive quick re-flip and not tired?}
+    ANTICIPATE -->|Yes| KNOW[Knowing wink; dart to 80 degrees; wait 550 ms; push]
+    ANTICIPATE -->|No| FAKE{Every second playful encounter?}
+    FAKE -->|Yes| SLEEP[Home; fake sleep 1300 ms; one-eye peek 650 ms; push]
+    FAKE -->|No| SURPRISE{Non-tired and surprise selected?}
+    SURPRISE -->|Yes| SPECIAL[System error, countdown, or deadpan; then one push]
+    SURPRISE -->|No| NORMAL[Selected mood choreography]
 ```
 
-Any fresh ON replaces the current performance; any OFF cancels a pending push. Dreams and victory visuals do not delay personality recovery.
+The introduction counts accepted activations, including ones cancelled before pushing. Held ON at startup consumes one activation after the 2.4-second intro. It does not consume mood variants, playful encounter counts, surprise selector calls, or victory celebrations. Sleep does not restart it.
 
-## Rare surprises
+Quick re-flips are ON within 1.2 seconds of OFF; a slower re-flip resets that streak. The quick streak includes introductory activations. Annoyed variant 4 overrides anticipation. Playful's encounter counter advances even when anticipation takes precedence.
 
-After anticipation and fake-sleep checks, a non-tired activation can select a rare surprise instead of the normal choreography. The first four activations are excluded. Eligible activations have a 1-in-12 chance; after a selection, eight intervening activations and 45 seconds are required before another draw can succeed. Consecutive selections differ.
+## Mood choreography
+
+All active moods have three variants except annoyed, which has four. Each has its own rotation, starting at variant 2: 2, 3, 1 for most moods, and 2, 3, 4, 1 for annoyed. Post-introduction activations advance the mood rotation even when an interaction trick replaces the chosen movement.
+
+| Mood | Variant 1 | Variant 2 | Variant 3 |
+|---|---|---|---|
+| Happy | Bob to 160 degrees, wait 250 ms, home, wait 250 ms, push | Two greeting bobs | Bow, wind back, swat |
+| Curious | Inspect at 108 degrees, closer look at 90, wait 300 ms, push | Double take with two retreats | Stepped approach and repeated inspection |
+| Suspicious | Approach 108 degrees, withdraw to 150, wait 400 ms, lunge | Startle, hide, cautiously reappear | Two aborted approaches, hide, lunge |
+| Playful | Dart to 80 degrees, pause, retract, settle, hide, slam | Two 80-degree fake-outs and a small peek | Long hide and two peeks |
+| Annoyed | Single swat | Two air-knocks, then swat | Stare near switch, withdraw, swat |
+| Furious | Swat, bounded second jab if still ON | Wind-up shake, attack | Charge, brake, recoil, attack |
+| Tired | Slow approach, pause, slam, slow return | Two sleepy nods before slow approach | Droopy false starts before slow approach |
+
+**Annoyed variant 4:** stow first if the arm is extended, then stay home for five seconds. At four seconds, close the eyes, open the mouth in a sigh, and play a descending exhale once. At five seconds, make one direct push with a deadpan face and retract. OFF cancels the wait, sigh, or push; a fresh ON replaces the routine. `ANNOYED_IGNORE_MS` controls the wait.
+
+**Tired:** every variant ends with an 18 ms/degree creep to 100 degrees, a 900 ms pause, and a direct push to 60 degrees. Return is slow. If an activation starts at or beyond the peek angle, return home and settle before beginning the tired sequence.
+
+Curious variant-1 approach timing varies with activation count: 6/3/0 ms per degree with 120/240/350 ms first pauses. Suspicious uses 8/5/10 ms and 250/400/550 ms. Playful's baseline peek lasts 700/900/1100 ms and its hidden wait 650/850/1050 ms. Scripted variants use their own flash-stored step timings.
+
+All movement is nonblocking. A zero step interval sends the target directly; it does not mean the physical shaft arrives instantly. Gesture positions must clear the actual mechanism.
+
+## Push result and interruption
+
+Arm home is 180 degrees; push is 60 degrees. Each push holds for at most 500 ms. Retraction includes 500 ms settling.
 
 ```mermaid
 flowchart TD
-    ELIGIBLE{Not tired, anticipating, or faking sleep?} -->|No| NORMAL[Existing routine]
-    ELIGIBLE -->|Yes| DRAW{Warmup and cooldown satisfied; 1-in-12 draw succeeds?}
-    DRAW -->|No| NORMAL
-    DRAW -->|Yes| LEAD[400 ms sound lead-in]
-    LEAD --> ERROR[Rainbow system error; 1800 ms]
-    LEAD --> COUNT[3-2-1 countdown; 2100 ms]
-    LEAD --> DEAD[Deadpan stare; 1100 ms]
-    ERROR --> PUSH[One direct push, then retract]
-    COUNT --> PUSH
-    DEAD --> PUSH
+    PUSH[Direct push to 60 degrees] --> RESULT{OFF while holding?}
+    RESULT -->|Yes| SUCCESS[Cancel remaining jabs; mark eligible victory]
+    SUCCESS --> HOME[Retract to 180 degrees; settle 500 ms]
+    RESULT -->|No after 500 ms| RETRY{Furious, no surprise, and only one jab?}
+    RETRY -->|Yes| RECOIL[Recoil to 108 degrees; wait 300 ms]
+    RECOIL --> PUSH
+    RETRY -->|No| FAIL[Mark surrender unless plain introduction]
+    FAIL --> HOME
+    HOME --> STILL{Switch still ON?}
+    STILL -->|Yes| BLOCK[Wait for OFF; no further attempts]
+    BLOCK --> FACE{Surrender marked?}
+    FACE -->|Yes| EMBARRASSED[Embarrassed face; waving flag; one falling squeak]
+    FACE -->|No| PLAIN[Plain wait]
+    STILL -->|No| WIN{Eligible victory and fewer than three celebrations?}
+    WIN -->|Yes| PARTY[Next victory face and melody; 1400 ms]
+    WIN -->|No| IDLE[Idle; recover]
+    PARTY --> IDLE
+    BLOCK -->|OFF| IDLE
+    OFF[Debounced OFF during any pending gesture] --> HOME
+    NEW[Fresh ON at any stage] --> REPLACE[Replace old response after usual 400 ms lead-in]
 ```
 
-All three keep the arm home during their visual performance, retain normal mood parameters, and remain cancellable on OFF. They play matching interaction cues and do not reset the controller.
+OFF clears pending surrender and cancels remaining gestures. A routine cannot repeat just because ON is held. Furious allows two pushes; surprise performances allow only one even if the underlying mood is furious. Surrender occurs after attempts run out and the arm returns home, not during a playful fake-out. Introductory failures simply wait without surrender theatre.
 
-## Surrender after unsuccessful attempts
+Victories require an OFF edge during `Holding`, after the plain introduction. The controller cannot determine whether the arm or the user physically moved the switch. A fresh activation before retraction finishes cancels a pending celebration.
 
-```mermaid
-flowchart TD
-    HOLD[Push held for up to 500 ms] --> OFF{Switch OFF?}
-    OFF -->|Yes| SUCCESS[Cancel remaining motion; return home; eligible victory]
-    OFF -->|No| RETRY{Ordinary furious routine with only one jab?}
-    RETRY -->|Yes| JAB[Recoil; one final jab]
-    JAB --> HOLD
-    RETRY -->|No| RETURN[You win: retract fully and settle]
-    RETURN --> STILL{Switch still ON?}
-    STILL -->|Yes| SURRENDER[Embarrassed face and waving white flag; one squeak; arm home]
-    STILL -->|No| IDLE[Clear surrender; idle]
-    SURRENDER -->|Held ON| SURRENDER
-    SURRENDER -->|OFF| IDLE
-```
+The first three completed victory celebrations per power-up are wink/confetti with ta-da, a pulsing heart with na-na boo-boo, and border confetti with a rising flourish. The arm stays home. A raw ON cuts off victory audio; the debounced ON replaces the performance.
 
-Surrender is a temporary expression, not a parameter reset. It performs no additional pushes and gives a single descending squeak after reaching home. A fresh OFF-to-ON starts a normal interaction. Rare surprises have a single-push budget even when the underlying mood is furious.
+## Surprise selector as implemented
 
-## Sound timing
+The selector is called once per post-introduction activation. It excludes its first four calls, so a surprise cannot occur before activation seven. Eligible calls have a 1-in-12 chance. After a selection, eight intervening calls and at least 45 seconds must pass before another selection can succeed. Ineligible calls advance the counter but cannot select a performance. Consecutive selected surprises differ. Interaction timing perturbs the private pseudorandom generator.
 
-- The 400 ms mood-sound lead-in remains on every accepted activation.
-- System error adds a short glitch phrase when the animation begins; deadpan adds a flat bloop.
-- Countdown ticks begin with the performance and repeat at 700 and 1400 ms, matching the digits.
-- Surrender squeaks once after retraction and settling. Holding ON does not replay it.
-- OFF cancels interaction cues; a fresh activation replaces them. Global sound disable mutes all cues.
+This does not match the requested frequent-surprise setting (50% chance, no time cooldown, guaranteed after two eligible misses); that remains a firmware discrepancy.
 
-Victory audio starts once after a successful push has returned home and settled. The first three celebrations use ta-da, a teasing na-na boo-boo cadence, and a rising flourish respectively. Tunes fit within the 1.4-second visual celebration and contain rests for face updates. A raw switch ON cuts off the tune; the debounced interaction then starts its response sound. Failed attempts and later wins do not trigger victory tunes.
+| Performance | Visual and arm | Sound |
+|---|---|---|
+| System error | Home; colorful scanlines for 1.3 seconds, composed face, push at 1.8 seconds | Glitch chirp |
+| Countdown | Home; 3, 2, 1 for 700 ms each, then push | Ticks at 0, 700, and 1400 ms |
+| Deadpan | Home; flat eyes and mouth for 1.1 seconds, then push | Flat bloop |
 
-## First two activations
+These durations follow the normal 400 ms lead-in. They do not reset parameters or the controller. The plain introduction, annoyed sigh, anticipation, fake sleep, and tired routine take precedence.
 
-The first two accepted activations per power-up bypass mood choreography and special performances: happy face/sound, 400 ms lead-in, one direct push, then return and settle. Failed pushes simply wait for OFF; successful pushes do not spend a victory celebration. Parameters still update. On the third activation, normal mood selection and special-behavior eligibility apply. Mood variant rotations remain untouched during the introduction. A cancelled accepted activation counts toward the two; a switch held ON at boot counts once after startup. Sleep does not reset this counter.
+## Face, dreams, and audio
 
-## Annoyed: reluctant compliance
+Startup is a silent 2.4-second full-grid rainbow ignition/ripple animation fading into the live sleeping face and Zs. Nine mood expressions use blinking, breathing, and eye-close/blend/eye-open transitions. Two dim blue 4x4 Zs move upward every 160 ms; their color is independent of breathing.
 
-Annoyed rotates through four variants (2, 3, 4, 1). Variant 4 takes precedence over anticipation and surprise selection, after the two plain introductory activations.
+After 12 seconds continuously asleep, a dim heart, star, or switch fades in and out over 3.2 seconds. Dreams repeat every 18 seconds and cycle pictures; normal Zs return between them. Sleep and dreams cause no sound or arm motion.
 
-```mermaid
-flowchart LR
-    PAUSE[400 ms response pause] --> STOW[Stow arm if needed]
-    STOW --> WAIT[Stay home for 5 seconds]
-    WAIT --> SIGH[At 4 seconds: eyes close, mouth exhales, descending sigh]
-    SIGH --> PUSH[At 5 seconds: one quick expressionless push]
-    PUSH --> RETURN[Retract; usual victory or surrender handling]
-```
+Mood phrases use 4 ms pitch updates. Special cues play for surprise performances, the annoyed sigh, surrender, and earned victories. OFF cancels response audio; victory audio is the deliberate exception while celebrating an OFF result. Startup, sleep, dreams, and ordinary idle recovery remain silent. `SOUND_ENABLED=false` mutes all audio.
 
-OFF cancels every stage; a fresh ON replaces the routine. The wait never holds the arm against the switch. All other moods retain their three-variant rotations.
+Timer1 drives one Servo object. Arduino tone uses Timer2. LED transfers begin 4-14 ms into the servo's 20 ms frame while D9 is LOW and avoid active audible tones. The arm remains attached at home. Face animations may wait for audio rests before showing a frame.
+
+## Hardware and verification
+
+Signals: D4 switch, D9 arm, D7 grid, D8 piezo. The schematic shows a 330 ohm D4 pull-down, direct grid/piezo signal connections, and three parallel 470 uF / 16 V rail capacitors. Switch and piezo returns connect directly to Nano GND; grid and servo use the rails. See the README's unresolved switch-polarity note.
+
+The test suite contains 103 controller scenarios plus separate audio timing checks and compile-time logic checks. It covers the introduction, active moods, special responses, successful and failed pushes, cancellation, rapid replacement, switch bounce, held-ON behavior, silent sleep, and timer rollover. Hardware torque, clearance, loudness, and LED readability require physical verification.

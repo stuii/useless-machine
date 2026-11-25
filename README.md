@@ -8,16 +8,17 @@ The firmware is C++ for a classic 5 V, 16 MHz ATmega328P Arduino Nano clone, bui
 
 [View the schematic](docs/schematic.png) | [Scalable SVG](docs/schematic.svg)
 
+The schematic records the described assembly:
+
 | Component | Connection |
 |---|---|
-| Maintained switch | D4 to switch to GND; internal pull-up, LOW means ON |
-| Arm servo | Signal on D9; power from the 5 V rail |
-| 8x8 WS2812B grid | DIN on D7 through a 330-470 ohm resistor; power from the 5 V rail |
-| Passive piezo | D8 through 330 ohms to positive lead; other lead to GND |
+| Two-terminal maintained switch | Nano 5V through switch to D4; 330 ohm pull-down from D4 to Nano GND |
+| Arm servo | Signal on D9; power and return on the shared rails |
+| 8x8 WS2812B grid | DIN directly on D7; power and return on the shared rails |
+| Passive piezo | Directly between D8 and Nano GND |
+| Rail capacitors | Three 470 uF / 16 V electrolytics in parallel across 5V and GND |
 
-Connect all grounds together. Use an external regulated 5 V supply sized for the servo's stall current plus the grid. Feed the servo and grid directly from the supply rails, with short power connections. Place a 500-1000 uF capacitor across the grid supply near its connector, observing polarity and using a voltage rating above 5 V.
-
-For USB programming, keep the external positive rail separate from the USB-powered Nano's 5V pin unless power isolation is verified. For standalone operation, the regulated rail can also feed the Nano's 5V pin. Do not feed regulated 5 V through VIN or route servo current through the Nano's USB connection or regulator.
+The schematic shows the peripheral rails fed from Nano 5V and GND, with USB supplying the Nano and VIN unconnected. The switch and piezo return directly to Nano GND. There are no series resistors on the grid data line or piezo. The continuous-wire schematic shows the described connections; it is not a measurement of power capacity or physical clearance.
 
 The firmware holds the onboard D13 LED LOW. The power LED and bootloader activity are independent of the sketch.
 
@@ -46,7 +47,7 @@ On power-up, the arm is commanded home while a silent 2.4-second rainbow animati
 
 The first two accepted activations after power-up use a happy face and sound, the usual 400 ms response pause, then a single direct push and return. They skip expressive gestures, surprises, victory celebrations, and surrender performances. Personality parameters still accumulate in the background, so the third activation begins mood-based behavior. The first three victory celebrations are reserved for successful pushes after this introduction. Sleep does not restart the introduction; `PLAIN_START_ACTIVATIONS` sets its length.
 
-Each accepted ON starts a mood-specific sound and waits **400 ms** before issuing an arm movement. The response can include gestures and additional pauses before the push. A stable OFF stops the sound, cancels pending gestures or jabs, and retracts the arm. Switch debounce is **30 ms**. A fresh OFF-to-ON can interrupt the current response.
+Each accepted ON starts its response sound and waits **400 ms** before issuing an arm movement. The response can include gestures and additional pauses before the push. A stable OFF stops the sound, cancels pending gestures or jabs, and retracts the arm. Switch debounce is **30 ms**. A fresh OFF-to-ON can interrupt the current response.
 
 Actual pushes command 60 degrees directly, without a software speed ramp. Each push is held for at most 500 ms; returning home includes 500 ms settling. A switch held ON does not trigger endless retries. The arm stays attached at home, including during sleep.
 
@@ -78,22 +79,22 @@ Sleepy and asleep are resting expressions. An activation wakes the personality a
 
 - **You win:** if the switch stays ON after the allowed attempts (one push, or up to two for furious), the arm retracts fully and the face shows downcast eyes, blushing cheeks, a crooked mouth, and a tiny waving white flag. It gives one falling squeak after retracting, then stays silently surrendered at home until OFF, with no further pushes. Turning OFF during retraction cancels the surrender; a successful push follows the victory path instead. The serial monitor prints `You win; returning home` when the attempt budget is exhausted.
 
-- **I saw that coming:** every third consecutive quick re-flip earns a knowing wink, a dart to 80 degrees, a 550 ms stare, then a push. A quick re-flip means ON within 1.2 seconds of OFF; a slower one resets the streak. Tired keeps its creep routine.
+- **I saw that coming:** every third consecutive quick re-flip earns a knowing wink, a dart to 80 degrees, a 550 ms stare, then a push. A quick re-flip means ON within 1.2 seconds of OFF; a slower one resets the streak. The introduction, tired routine, and annoyed sigh variant take precedence.
 - **Fake sleep:** every second playful encounter stays home with closed eyes for 1.3 seconds, opens one eye for 650 ms, then slams. Anticipation takes precedence if both qualify.
-- **Victory celebrations:** an OFF edge while holding a push qualifies for a celebration after retraction. The first three celebrations per power-up are wink/confetti, a pulsing heart, and colorful border confetti. Each lasts 1.4 seconds and keeps the arm home. The matching melodies are a ta-da fanfare, a teasing na-na boo-boo cadence, and a rising flourish. Each plays once after retraction; another switch ON immediately cuts it off.
+- **Victory celebrations:** an OFF edge while holding a push qualifies for a celebration after retraction. The first three celebrations after the plain introduction, per power-up, are wink/confetti, a pulsing heart, and colorful border confetti. Each lasts 1.4 seconds and keeps the arm home. The matching melodies are a ta-da fanfare, a teasing na-na boo-boo cadence, and a rising flourish. Each plays once after retraction; another switch ON immediately cuts it off.
 - **Dreaming:** after 12 seconds continuously asleep, a dim heart, star, or switch fades above the sleeping face for 3.2 seconds. Dreams repeat every 18 seconds, cycling through the pictures. Moving Zs return between dreams. The arm stays still and dreams are silent.
 
 ### Rare surprises
 
-After the first four interactions, eligible pokes have a 1-in-12 chance of replacing the usual routine with one of these performances:
+The selector skips its first four calls after the two plain introductory activations. Starting no earlier than activation seven, eligible pokes have a 1-in-12 chance of replacing the usual routine with one of these performances:
 
 - **Rainbow system error:** colorful broken scanlines for 1.3 seconds, a brief composed face, then a single push at 1.8 seconds. This is an animation, not a reset.
 - **Dramatic countdown:** the grid counts 3, 2, 1 in changing colors, spending 700 ms on each digit before the slam.
 - **Deadpan:** flat eyes and a straight mouth, an unblinking 1.1-second stare at home, then one plain push.
 
-The arm stays home during the performance. Each retains the 400 ms mood-sound lead-in, followed by its own cue: a glitch chirp, 700 ms countdown ticks, or a flat deadpan bloop. OFF cancels the pending push; another ON replaces the performance. Tired, anticipation, and fake sleep take priority.
+The arm stays home during the performance. Each retains the 400 ms mood-sound lead-in, followed by its own cue: a glitch chirp, 700 ms countdown ticks, or a flat deadpan bloop. OFF cancels the pending push; another ON replaces the performance. The plain introduction, annoyed sigh variant, tired routine, anticipation, and fake sleep take priority.
 
-After a surprise, at least eight intervening interactions and 45 seconds must pass before another can be selected. Consecutive surprises never use the same performance. Selection mixes interaction timing into a private pseudorandom generator; it does not run on a fixed flip count. Serial output identifies the selection as `Rare surprise=1/2/3` in the order above.
+After a surprise, at least eight intervening interactions and 45 seconds must pass before another can be selected. The counter advances on every post-introduction activation, including ones ineligible for a surprise. Consecutive surprises never use the same performance. Selection mixes interaction timing into a private pseudorandom generator; it does not run on a fixed flip count. Serial output identifies the selection as `Rare surprise=1/2/3` in the order above.
 
 ## Personality and recovery
 
@@ -131,7 +132,7 @@ The panel uses straight rows, no rotation, and no mirroring. Brightness is **10/
 | `SLEEP_Z_STATIC_TEST` | Freeze Z motion for orientation checks |
 | `SOUND_ENABLED` | Enable or mute the piezo |
 
-The passive piezo plays mood-specific phrases with 4 ms pitch updates. Special performances add a glitch chirp, countdown ticks aligned with 3-2-1, or a flat deadpan bloop. Surrender gives one descending squeak after the arm returns home. OFF cancels interaction audio; a fresh interaction replaces the current phrase.
+The passive piezo plays mood-specific phrases with 4 ms pitch updates. Special performances add a glitch chirp, countdown ticks aligned with 3-2-1, or a flat deadpan bloop. Annoyed variant 4 sighs during the last second of its five-second wait. Surrender gives one descending squeak after the arm returns home. OFF cancels interaction audio; a fresh interaction replaces the current phrase.
 
 Startup, sleep, dreams, and ordinary idle recovery are silent. Victory tunes play only during an earned celebration. `SOUND_ENABLED=false` mutes all interaction sounds.
 
@@ -147,6 +148,9 @@ Servo timing uses Timer1; Arduino `tone` uses Timer2. WS2812B transfers start wi
 | [include/choreography.h](include/choreography.h) | Gesture sequences stored in flash |
 | [src/face.cpp](src/face.cpp) | Face rendering, transitions, celebrations, dreams |
 | [src/sound.cpp](src/sound.cpp) | Nonblocking piezo playback |
+| [include/sound_patterns.h](include/sound_patterns.h) | Mood phrases and special cues |
+| [include/surprises.h](include/surprises.h) | Surprise selection and timing |
+| [tests/host/sound_test.cpp](tests/host/sound_test.cpp) | Audio timing and cancellation checks |
 | [tests/logic_checks.cpp](tests/logic_checks.cpp) | Compile-time logic checks |
 | [tests/host/mechanism_test.cpp](tests/host/mechanism_test.cpp) | Controller simulations with fake Arduino I/O |
 
@@ -158,7 +162,7 @@ Build the firmware with PlatformIO. Compile the logic checks with the AVR toolch
 avr-g++ -mmcu=atmega328p -std=c++14 -Iinclude -c tests/logic_checks.cpp -o .pio/logic_checks.o
 ```
 
-The host simulator has 103 scenarios covering mood routines, gesture cancellation, switch debounce, held-ON limits, rapid re-flips, tired approaches, startup, timing rollover, anticipation, fake sleep, victory limits, and the dream schedule. With Zig installed and available on PATH, run from PowerShell:
+The host simulator has 103 scenarios covering mood routines, gesture cancellation, switch debounce, held-ON limits, rapid re-flips, tired approaches, startup, timing rollover, anticipation, fake sleep, victory audio and limits, the plain introduction, annoyed waiting and cancellation, and the dream schedule. With Zig installed and available on PATH, run from PowerShell:
 
 ```powershell
 zig c++ -target x86_64-windows-gnu -std=c++14 -Itests/host -Iinclude tests/host/mechanism_test.cpp -o .pio/mechanism_test.exe
